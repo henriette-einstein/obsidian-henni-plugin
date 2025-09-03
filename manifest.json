@@ -3,8 +3,8 @@
 	"name": "Henni Plugin",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "A simple plugin created with Gemini.",
-	"author": "Gemini",
+	"description": "A simple Obsidian plugin.",
+	"author": "Armin Pfarr",
 	"authorUrl": "",
 	"isDesktopOnly": false
 }

@@ -41,7 +41,9 @@ const config = {
 };
 
 if (process.argv[2] === "--watch") {
-	config.watch = true;
+	esbuild.context(config).then(ctx => {
+		ctx.watch();
+	}).catch(() => process.exit(1));
+} else {
+	esbuild.build(config).catch(() => process.exit(1));
 }
-
-esbuild.build(config).catch(() => process.exit(1));
