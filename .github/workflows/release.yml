@@ -34,12 +34,12 @@ jobs:
           pwd
           ls -la
 
-      - name: Create GitHub Release (draft)
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          draft: true
+          draft: false
           name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           fail_on_unmatched_files: true
