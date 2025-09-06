@@ -1,4 +1,4 @@
-name: Release
+name: Build and Release Obsidian Plugin
 
 on:
   push:
@@ -8,38 +8,30 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3
+
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '18.x'
 
-      - name: Build
-        id: build
+      - name: Build plugin
         run: |
           npm install
           npm run build
-          zip -r plugin.zip main.js manifest.json styles.css
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+        run: |
+          echo "Tag to release: $GITHUB_REF_NAME"
+          echo "Release version: ${GITHUB_REF#refs/tags/}"
+          tag="${GITHUB_REF#refs/tags/}"
 
-      - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./plugin.zip
-          asset_name: obsidian-henni-plugin-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
+          gh release create "$GITHUB_REF_NAME" \
+            --title="$GITHUB_REF_NAME" \
+            --draft \
+            main.js manifest.json styles.css
