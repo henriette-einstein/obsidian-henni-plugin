@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-henni-plugin",
 	"name": "Henni Plugin",
-	"version": "1.0.0",
+	"version": "0.9.8",
 	"minAppVersion": "0.15.0",
 	"description": "A simple Obsidian plugin.",
 	"author": "Armin Pfarr",
