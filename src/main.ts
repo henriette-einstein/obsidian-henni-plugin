@@ -121,7 +121,7 @@ export default class HenniPlugin extends Plugin {
     }
 
     // Utility: create or copy a note for a media file (shared by commands and event handler)
-    private async processMedia(file: TFile, kind: 'image' | 'pdf', targetFolder: string): Promise<void> {
+    public async processMedia(file: TFile, kind: 'image' | 'pdf', targetFolder: string): Promise<void> {
         await this.ensureFolderExists(targetFolder);
         const prefix = kind === 'image' ? 'IMG' : 'PDF';
         const baseName = `${prefix}-${file.basename}`;
@@ -291,7 +291,16 @@ class ImageNoteSettingTab extends PluginSettingTab {
 					.setButtonText('Run')
 					.onClick(async () => {
 						try {
-							await this.app.commands.executeCommandById('obsidian-henni-plugin:scan-images-and-create-imagenote');
+                            // Directly call the command logic instead of using app.commands
+                            new Notice('Scanning images...');
+                            const images = this.app.vault.getFiles().filter(file => {
+                                return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(file.extension.toLowerCase());
+                            });
+                            const folder = this.plugin.settings.imageNoteFolder;
+                            for (const image of images) {
+                                try { await this.plugin.processMedia(image, 'image', folder); } catch (e) { console.error('Failed processing image', image.path, e); }
+                            }
+                            new Notice('Scan complete. Image notes updated.');
 						} catch (e) {
 							console.error('Failed to run image note creation command', e);
 						}
@@ -304,7 +313,13 @@ class ImageNoteSettingTab extends PluginSettingTab {
 					.setButtonText('Run')
 					.onClick(async () => {
 						try {
-							await this.app.commands.executeCommandById('obsidian-henni-plugin:scan-pdfs-and-create-pdfnote');
+                            new Notice('Scanning PDFs...');
+                            const pdfs = this.app.vault.getFiles().filter(file => file.extension.toLowerCase() === 'pdf');
+                            const folder = this.plugin.settings.pdfNoteFolder;
+                            for (const pdf of pdfs) {
+                                try { await this.plugin.processMedia(pdf, 'pdf', folder); } catch (e) { console.error('Failed processing pdf', pdf.path, e); }
+                            }
+                            new Notice('Scan complete. PDF notes updated.');
 						} catch (e) {
 							console.error('Failed to run PDF note creation command', e);
 						}
