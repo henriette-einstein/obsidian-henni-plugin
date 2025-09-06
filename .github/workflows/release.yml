@@ -5,6 +5,11 @@ on:
     tags:
       - '*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create/release (e.g. v1.2.3)"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -24,14 +29,20 @@ jobs:
           npm ci
           npm run build
 
+      - name: Show built files
+        run: |
+          pwd
+          ls -la
+
       - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           draft: true
-          name: ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
+          name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: true
           files: |
             main.js
             manifest.json
