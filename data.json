@@ -24,5 +24,8 @@
     "ppt",
     "pptx",
     "numbers"
-  ]
+  ],
+  "imageTemplatePath": "",
+  "pdfTemplatePath": "",
+  "otherTemplatePath": ""
 }

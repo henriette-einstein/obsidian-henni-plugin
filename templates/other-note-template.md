@@ -1,8 +1,12 @@
 ---
-type: "[[Media]]"
+{{fileLinkProperty}}: "[[{{url}}]]"
+type: "[[Medien]]"
 tags: type/media
 created: {{date}}
 duplicate: {{duplicate}}
-url: "[[{{url}}]]"
+basename: "{{basename}}"
+extension: "{{extension}}"
+folder: "{{folder}}"
+filesize: {{filesize}}
 ---
 [[{{url}}]]

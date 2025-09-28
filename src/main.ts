@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from 
 // Helper to format created date
 const formatCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-type MediaKind = 'image' | 'pdf' | 'other';
+export type MediaKind = 'image' | 'pdf' | 'other';
 
 export default class HenniPlugin extends Plugin {
     settings: HenniPluginSettings;
@@ -38,6 +38,29 @@ export default class HenniPlugin extends Plugin {
         return this.getExtensions(kind).includes(ext);
     }
 
+    private resolveKind(file: TFile): MediaKind | null {
+        const ext = file.extension?.toLowerCase();
+        if (!ext) return null;
+        if (this.settings.imageExtensions.includes(ext)) return 'image';
+        if (this.settings.pdfExtensions.includes(ext)) return 'pdf';
+        if (this.settings.otherExtensions.includes(ext)) return 'other';
+        return null;
+    }
+
+    private getTargetFolder(kind: MediaKind): string | undefined {
+        if (kind === 'image') return this.settings.imageNoteFolder;
+        if (kind === 'pdf') return this.settings.pdfNoteFolder;
+        return this.settings.othetDigitalAssetsNoteFolder;
+    }
+
+    private computePrimaryNotePath(file: TFile, kind: MediaKind, folder: string): { baseName: string; notePath: string } {
+        const prefixSource = file.extension ? file.extension : kind;
+        const prefix = prefixSource.toUpperCase();
+        const baseName = `${prefix}-${file.basename}`;
+        const notePath = `${folder}/${baseName}.md`;
+        return { baseName, notePath };
+    }
+
 	// Utility: check if a note exists and whether it links to the given target via configured YAML property
     private async noteStatus(notePath: string, targetPath: string): Promise<'not-found' | 'matches' | 'exists-different'> {
         const abstract = this.app.vault.getAbstractFileByPath(notePath);
@@ -49,7 +72,7 @@ export default class HenniPlugin extends Plugin {
             if (!exists) return 'not-found';
         } catch (_) {}
 
-        const key = this.settings.fileLinkProperty || 'url';
+        const key = 'url';
         const compare = (raw: string | undefined): 'matches' | 'exists-different' => {
             if (!raw) return 'exists-different';
             const val = raw.trim().replace(/^"|"$/g, "");
@@ -130,16 +153,15 @@ export default class HenniPlugin extends Plugin {
     // Utility: build note content for a media file
 
     private defaultTemplate(): string {
-        return `---\ncreated: {{date}}\nurl: {{url}}\nduplicate: {{duplicate}}\n---\n![[{{url}}]]\n`;
+        return `---\ncreated: {{date}}\nduplicate: {{duplicate}}\nbasename: "{{basename}}"\nextension: "{{extension}}"\nfolder: "{{folder}}"\nfilesize: {{filesize}}\ncover: {{cover}}\n{{fileLinkProperty}}: {{url}}\n---\n![[{{url}}]]\n`;
     }
-    
 
     private getTemplateDir(): string {
         const configDir = (this.app.vault as any).configDir ?? '.obsidian';
         return `${configDir}/plugins/${this.manifest.id}/templates`;
     }
 
-    private getTemplatePath(kind: MediaKind): string {
+    public getDefaultTemplatePath(kind: MediaKind): string {
         const dir = this.getTemplateDir();
         const filename = kind === 'image'
             ? 'image-note-template.md'
@@ -149,29 +171,59 @@ export default class HenniPlugin extends Plugin {
         return `${dir}/${filename}`;
     }
 
+    private getUserTemplatePath(kind: MediaKind): string | undefined {
+        const raw = kind === 'image'
+            ? this.settings.imageTemplatePath
+            : kind === 'pdf'
+                ? this.settings.pdfTemplatePath
+                : this.settings.otherTemplatePath;
+        const trimmed = typeof raw === 'string' ? raw.trim() : '';
+        return trimmed ? trimmed : undefined;
+    }
+
     private async loadTemplate(kind: MediaKind): Promise<string> {
         const cached = this.templateCache[kind];
         if (cached) return cached;
-        const path = this.getTemplatePath(kind);
-        try {
-            const content = await this.app.vault.adapter.read(path);
-            this.templateCache[kind] = content;
-            return content;
-        } catch (error) {
-            console.error(`Failed to read ${kind} media note template at ${path}. Falling back to default inline template.`, error);
-            const fallback = this.defaultTemplate();
-            this.templateCache[kind] = fallback;
-            return fallback;
+        const userPath = this.getUserTemplatePath(kind);
+        const candidates = userPath ? [userPath, this.getDefaultTemplatePath(kind)] : [this.getDefaultTemplatePath(kind)];
+        for (const path of candidates) {
+            try {
+                const content = await this.app.vault.adapter.read(path);
+                this.templateCache[kind] = content;
+                return content;
+            } catch (error) {
+                console.error(`Failed to read ${kind} media note template at ${path}.`, error);
+            }
+        }
+        const fallback = this.defaultTemplate();
+        this.templateCache[kind] = fallback;
+        return fallback;
+    }
+
+    public clearTemplateCache(kind?: MediaKind): void {
+        if (kind) {
+            delete this.templateCache[kind];
+        } else {
+            this.templateCache = {};
         }
     }
 
-    private async buildNoteContent(filePath: string, kind: MediaKind, duplicate = false): Promise<string> {
+    private async buildNoteContent(file: TFile, kind: MediaKind, duplicate = false): Promise<string> {
         const template = await this.loadTemplate(kind);
         const created = formatCreated();
+        const filePath = file.path;
+        const coverLink = kind === 'pdf' ? '[[To calculate]]' : '';
+        const urlProperty = this.settings.fileLinkProperty || 'url';
         const replacements: Record<string, string> = {
             date: created,
             url: filePath,
+            fileLinkProperty: urlProperty,
             duplicate: duplicate ? 'true' : 'false',
+            basename: file.basename ?? '',
+            extension: file.extension ?? '',
+            folder: file.parent?.path ?? '',
+            filesize: `${file.stat?.size ?? 0}`,
+            cover: coverLink,
         };
         let rendered = template;
         for (const key in replacements) {
@@ -186,14 +238,12 @@ export default class HenniPlugin extends Plugin {
     // Utility: create or copy a note for a media file (shared by commands and event handler)
     public async processMedia(file: TFile, kind: MediaKind, targetFolder: string): Promise<void> {
         await this.ensureFolderExists(targetFolder);
-        const prefix = (file.extension ? file.extension : kind).toUpperCase();
-        const baseName = `${prefix}-${file.basename}`;
-        const notePath = `${targetFolder}/${baseName}.md`;
+        const { baseName, notePath } = this.computePrimaryNotePath(file, kind, targetFolder);
 
         const status = await this.noteStatus(notePath, file.path);
         if (status === 'not-found') {
             try {
-                const content = await this.buildNoteContent(file.path, kind, false);
+                const content = await this.buildNoteContent(file, kind, false);
                 await this.app.vault.create(notePath, content);
             } catch (e) {
                 if (!this.isAlreadyExistsError(e)) {
@@ -208,7 +258,7 @@ export default class HenniPlugin extends Plugin {
         for (let attempts = 0; attempts < 100; attempts++) {
             const copyPath = this.getNextCopyNotePath(targetFolder, baseName);
             try {
-                const content = await this.buildNoteContent(file.path, kind, true);
+                const content = await this.buildNoteContent(file, kind, true);
                 await this.app.vault.create(copyPath, content);
                 break;
             } catch (e) {
@@ -298,6 +348,41 @@ export default class HenniPlugin extends Plugin {
         }));
 
 		this.addSettingTab(new ImageNoteSettingTab(this.app, this));
+
+		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+			if (!(file instanceof TFile)) return;
+			const kind = this.resolveKind(file);
+			if (!kind) return;
+			const folder = this.getTargetFolder(kind);
+			if (!folder) return;
+			const { notePath } = this.computePrimaryNotePath(file, kind, folder);
+			const abstract = this.app.vault.getAbstractFileByPath(notePath);
+			const existingNote = abstract instanceof TFile ? abstract : null;
+
+			if (!existingNote) {
+				menu.addItem(item => {
+					item.setTitle('Create media note');
+					item.onClick(async () => {
+						await this.processMedia(file, kind, folder);
+						const created = this.app.vault.getAbstractFileByPath(notePath);
+						if (created instanceof TFile) {
+							await this.app.workspace.getLeaf(false).openFile(created);
+						}
+					});
+				});
+			} else {
+				menu.addItem(item => {
+					item.setTitle('Open media note');
+					item.onClick(async () => {
+						await this.processMedia(file, kind, folder);
+						const updated = this.app.vault.getAbstractFileByPath(notePath);
+						if (updated instanceof TFile) {
+							await this.app.workspace.getLeaf(false).openFile(updated);
+						}
+					});
+				});
+			}
+		}));
 	}
 
 	async loadSettings() {
@@ -306,6 +391,13 @@ export default class HenniPlugin extends Plugin {
 		this.settings.imageExtensions = this.normalizeExtensions((stored as any)?.imageExtensions, DEFAULT_SETTINGS.imageExtensions);
 		this.settings.pdfExtensions = this.normalizeExtensions((stored as any)?.pdfExtensions, DEFAULT_SETTINGS.pdfExtensions);
 		this.settings.otherExtensions = this.normalizeExtensions((stored as any)?.otherExtensions, DEFAULT_SETTINGS.otherExtensions);
+		this.settings.fileLinkProperty = typeof (stored as any)?.fileLinkProperty === 'string'
+			? (stored as any).fileLinkProperty.trim() || DEFAULT_SETTINGS.fileLinkProperty
+			: DEFAULT_SETTINGS.fileLinkProperty;
+		this.settings.imageTemplatePath = typeof (stored as any)?.imageTemplatePath === 'string' ? (stored as any).imageTemplatePath.trim() : '';
+		this.settings.pdfTemplatePath = typeof (stored as any)?.pdfTemplatePath === 'string' ? (stored as any).pdfTemplatePath.trim() : '';
+		this.settings.otherTemplatePath = typeof (stored as any)?.otherTemplatePath === 'string' ? (stored as any).otherTemplatePath.trim() : '';
+		this.clearTemplateCache();
 	}
 
 	async saveSettings() {
