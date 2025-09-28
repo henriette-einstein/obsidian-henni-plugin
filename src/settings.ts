@@ -15,8 +15,8 @@ export interface HenniPluginSettings {
 export const DEFAULT_SETTINGS: HenniPluginSettings = {
     imageNoteFolder: '60 Bibliothek/Bilder',
     pdfNoteFolder: '60 Bibliothek/PDFs',
-    othetDigitalAssetsNoteFolder: '60 Bibliothek/Medien',
-    autoCreateOnFileAdd: true,
+    othetDigitalAssetsNoteFolder: '60 Bibliothek/MediMedianMen',
+    autoCreateOnFileAdd: false,
     fileLinkProperty: 'url',
     imageExtensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'],
     pdfExtensions: ['pdf'],

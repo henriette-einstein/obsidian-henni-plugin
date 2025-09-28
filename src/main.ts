@@ -4,9 +4,12 @@ import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from 
 // Helper to format created date
 const formatCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+type MediaKind = 'image' | 'pdf' | 'other';
+
 export default class HenniPlugin extends Plugin {
     settings: HenniPluginSettings;
     private ensuredFolders: Set<string> = new Set();
+    private templateCache: Partial<Record<MediaKind, string>> = {};
 
     private normalizeExtensions(value: unknown, fallback: string[]): string[] {
         const source = Array.isArray(value)
@@ -23,13 +26,13 @@ export default class HenniPlugin extends Plugin {
         return Array.from(new Set(normalized));
     }
 
-    public getExtensions(kind: 'image' | 'pdf' | 'other'): string[] {
+    public getExtensions(kind: MediaKind): string[] {
         if (kind === 'image') return this.settings.imageExtensions;
         if (kind === 'pdf') return this.settings.pdfExtensions;
         return this.settings.otherExtensions;
     }
 
-    private matchesExtension(extension: string | undefined, kind: 'image' | 'pdf' | 'other'): boolean {
+    private matchesExtension(extension: string | undefined, kind: MediaKind): boolean {
         if (!extension) return false;
         const ext = extension.toLowerCase();
         return this.getExtensions(kind).includes(ext);
@@ -125,25 +128,63 @@ export default class HenniPlugin extends Plugin {
     }
 
     // Utility: build note content for a media file
-    private buildNoteContent(filePath: string, kind: 'image' | 'pdf' | 'other', duplicate = false): string {
+
+    private defaultTemplate(): string {
+        return `---\ncreated: {{date}}\nurl: {{url}}\nduplicate: {{duplicate}}\n---\n![[{{url}}]]\n`;
+    }
+    
+
+    private getTemplateDir(): string {
+        const configDir = (this.app.vault as any).configDir ?? '.obsidian';
+        return `${configDir}/plugins/${this.manifest.id}/templates`;
+    }
+
+    private getTemplatePath(kind: MediaKind): string {
+        const dir = this.getTemplateDir();
+        const filename = kind === 'image'
+            ? 'image-note-template.md'
+            : kind === 'pdf'
+                ? 'pdf-note-template.md'
+                : 'other-note-template.md';
+        return `${dir}/${filename}`;
+    }
+
+    private async loadTemplate(kind: MediaKind): Promise<string> {
+        const cached = this.templateCache[kind];
+        if (cached) return cached;
+        const path = this.getTemplatePath(kind);
+        try {
+            const content = await this.app.vault.adapter.read(path);
+            this.templateCache[kind] = content;
+            return content;
+        } catch (error) {
+            console.error(`Failed to read ${kind} media note template at ${path}. Falling back to default inline template.`, error);
+            const fallback = this.defaultTemplate();
+            this.templateCache[kind] = fallback;
+            return fallback;
+        }
+    }
+
+    private async buildNoteContent(filePath: string, kind: MediaKind, duplicate = false): Promise<string> {
+        const template = await this.loadTemplate(kind);
         const created = formatCreated();
-        const prop = this.settings.fileLinkProperty || 'url';
-        const tags = kind === 'image'
-            ? 'type/image'
-            : kind === 'pdf'
-                ? 'type/pdf'
-                : 'type/digital-asset';
-        const typeLine = kind === 'image'
-            ? 'type: "[[Bilder]]"\n'
-            : kind === 'pdf'
-                ? 'type: "[[PDFs]]"\n'
-                : '';
-        const dupLine = duplicate ? 'duplicate: true\n' : '';
-        return `---\n${prop}: "[[${filePath}]]"\n${typeLine}tags: ${tags}\ncreated: ${created}\n${dupLine}---\n![[${filePath}]]\n`;
+        const replacements: Record<string, string> = {
+            date: created,
+            url: filePath,
+            duplicate: duplicate ? 'true' : 'false',
+        };
+        let rendered = template;
+        for (const key in replacements) {
+            if (!Object.prototype.hasOwnProperty.call(replacements, key)) continue;
+            const value = replacements[key];
+            const regex = new RegExp(`{{${key}}}`, 'g');
+            rendered = rendered.replace(regex, value);
+        }
+        return rendered;
     }
 
     // Utility: create or copy a note for a media file (shared by commands and event handler)
-    public async processMedia(file: TFile, kind: 'image' | 'pdf' | 'other', targetFolder: string): Promise<void> {
+    public async processMedia(file: TFile, kind: MediaKind, targetFolder: string): Promise<void> {
         await this.ensureFolderExists(targetFolder);
         const prefix = (file.extension ? file.extension : kind).toUpperCase();
         const baseName = `${prefix}-${file.basename}`;
@@ -152,7 +193,8 @@ export default class HenniPlugin extends Plugin {
         const status = await this.noteStatus(notePath, file.path);
         if (status === 'not-found') {
             try {
-                await this.app.vault.create(notePath, this.buildNoteContent(file.path, kind, false));
+                const content = await this.buildNoteContent(file.path, kind, false);
+                await this.app.vault.create(notePath, content);
             } catch (e) {
                 if (!this.isAlreadyExistsError(e)) {
                     console.error('Failed to create base note', notePath, e);
@@ -166,7 +208,8 @@ export default class HenniPlugin extends Plugin {
         for (let attempts = 0; attempts < 100; attempts++) {
             const copyPath = this.getNextCopyNotePath(targetFolder, baseName);
             try {
-                await this.app.vault.create(copyPath, this.buildNoteContent(file.path, kind, true));
+                const content = await this.buildNoteContent(file.path, kind, true);
+                await this.app.vault.create(copyPath, content);
                 break;
             } catch (e) {
                 if (this.isAlreadyExistsError(e)) {
