@@ -1,18 +1,5 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-
-interface HenniPluginSettings {
-	imageNoteFolder: string;
-	pdfNoteFolder: string;
-	autoCreateOnFileAdd: boolean;
-    fileLinkProperty: string;
-}
-
-const DEFAULT_SETTINGS: HenniPluginSettings = {
-	imageNoteFolder: '60 Bibliothek/Bilder',
-	pdfNoteFolder: '60 Bibliothek/PDFs',
-	autoCreateOnFileAdd: true,
-    fileLinkProperty: 'url'
-}
+import { Notice, Plugin, TFile } from 'obsidian';
+import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
 
 // Helper to format created date
 const formatCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -20,6 +7,33 @@ const formatCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 export default class HenniPlugin extends Plugin {
     settings: HenniPluginSettings;
     private ensuredFolders: Set<string> = new Set();
+
+    private normalizeExtensions(value: unknown, fallback: string[]): string[] {
+        const source = Array.isArray(value)
+            ? value
+            : typeof value === 'string'
+                ? value.split(/[\s,;]+/)
+                : fallback;
+        const normalized = source
+            .map(entry => typeof entry === 'string' ? entry.trim().replace(/^\./, '').toLowerCase() : '')
+            .filter(Boolean);
+        if (!Array.isArray(value) && typeof value !== 'string' && normalized.length === 0) {
+            return [...fallback];
+        }
+        return Array.from(new Set(normalized));
+    }
+
+    public getExtensions(kind: 'image' | 'pdf' | 'other'): string[] {
+        if (kind === 'image') return this.settings.imageExtensions;
+        if (kind === 'pdf') return this.settings.pdfExtensions;
+        return this.settings.otherExtensions;
+    }
+
+    private matchesExtension(extension: string | undefined, kind: 'image' | 'pdf' | 'other'): boolean {
+        if (!extension) return false;
+        const ext = extension.toLowerCase();
+        return this.getExtensions(kind).includes(ext);
+    }
 
 	// Utility: check if a note exists and whether it links to the given target via configured YAML property
     private async noteStatus(notePath: string, targetPath: string): Promise<'not-found' | 'matches' | 'exists-different'> {
@@ -111,19 +125,27 @@ export default class HenniPlugin extends Plugin {
     }
 
     // Utility: build note content for a media file
-    private buildNoteContent(filePath: string, kind: 'image' | 'pdf', duplicate = false): string {
+    private buildNoteContent(filePath: string, kind: 'image' | 'pdf' | 'other', duplicate = false): string {
         const created = formatCreated();
         const prop = this.settings.fileLinkProperty || 'url';
-        const tags = kind === 'image' ? 'type/image' : 'type/pdf';
-        const typeLine = kind === 'image' ? 'type: "[[Bilder]]"\n' : 'type: "[[PDFs]]"\n';
+        const tags = kind === 'image'
+            ? 'type/image'
+            : kind === 'pdf'
+                ? 'type/pdf'
+                : 'type/digital-asset';
+        const typeLine = kind === 'image'
+            ? 'type: "[[Bilder]]"\n'
+            : kind === 'pdf'
+                ? 'type: "[[PDFs]]"\n'
+                : '';
         const dupLine = duplicate ? 'duplicate: true\n' : '';
         return `---\n${prop}: "[[${filePath}]]"\n${typeLine}tags: ${tags}\ncreated: ${created}\n${dupLine}---\n![[${filePath}]]\n`;
     }
 
     // Utility: create or copy a note for a media file (shared by commands and event handler)
-    public async processMedia(file: TFile, kind: 'image' | 'pdf', targetFolder: string): Promise<void> {
+    public async processMedia(file: TFile, kind: 'image' | 'pdf' | 'other', targetFolder: string): Promise<void> {
         await this.ensureFolderExists(targetFolder);
-        const prefix = kind === 'image' ? 'IMG' : 'PDF';
+        const prefix = (file.extension ? file.extension : kind).toUpperCase();
         const baseName = `${prefix}-${file.basename}`;
         const notePath = `${targetFolder}/${baseName}.md`;
 
@@ -164,10 +186,13 @@ export default class HenniPlugin extends Plugin {
 			id: 'scan-images-and-create-imagenote',
 			name: 'Scan images and create image notes',
             callback: async () => {
+                const extensions = this.getExtensions('image');
+                if (extensions.length === 0) {
+                    new Notice('No image extensions configured.');
+                    return;
+                }
                 new Notice('Scanning images...');
-                const images = this.app.vault.getFiles().filter(file => {
-                    return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(file.extension.toLowerCase());
-                });
+                const images = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'image'));
                 const folder = this.settings.imageNoteFolder;
                 for (const image of images) {
                     try { await this.processMedia(image, 'image', folder); } catch (e) { console.error('Failed processing image', image.path, e); }
@@ -181,8 +206,13 @@ export default class HenniPlugin extends Plugin {
 			id: 'scan-pdfs-and-create-pdfnote',
 			name: 'Scan PDFs and create PDF notes',
             callback: async () => {
+                const extensions = this.getExtensions('pdf');
+                if (extensions.length === 0) {
+                    new Notice('No PDF extensions configured.');
+                    return;
+                }
                 new Notice('Scanning PDFs...');
-                const pdfs = this.app.vault.getFiles().filter(file => file.extension.toLowerCase() === 'pdf');
+                const pdfs = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'pdf'));
                 const folder = this.settings.pdfNoteFolder;
                 for (const pdf of pdfs) {
                     try { await this.processMedia(pdf, 'pdf', folder); } catch (e) { console.error('Failed processing pdf', pdf.path, e); }
@@ -191,24 +221,33 @@ export default class HenniPlugin extends Plugin {
             }
         });
 
-		// Auto-create notes when images or PDFs are added to the vault
+		// Auto-create notes when supported files are added to the vault
 		this.registerEvent(this.app.vault.on('create', async (file) => {
 			if (!(file instanceof TFile)) return;
 			if (!this.settings.autoCreateOnFileAdd) return;
-			const ext = file.extension?.toLowerCase();
-			const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(ext);
-			const isPdf = ext === 'pdf';
-			if (!isImage && !isPdf) return; // ignore non-media files (and avoids loops on created .md)
+			const ext = file.extension;
+			const isImage = this.matchesExtension(ext, 'image');
+			const isPdf = this.matchesExtension(ext, 'pdf');
+			const isOther = this.matchesExtension(ext, 'other');
+			if (!isImage && !isPdf && !isOther) return; // ignore unsupported files (and avoids loops on created .md)
 
             try {
                 if (isImage) {
                     const folder = this.settings.imageNoteFolder;
                     await this.processMedia(file, 'image', folder);
+                    return;
                 }
 
                 if (isPdf) {
                     const folder = this.settings.pdfNoteFolder;
                     await this.processMedia(file, 'pdf', folder);
+                    return;
+                }
+
+                if (isOther) {
+                    const folder = this.settings.othetDigitalAssetsNoteFolder;
+                    if (!folder) return;
+                    await this.processMedia(file, 'other', folder);
                 }
             } catch (e) {
                 console.error('Auto note creation failed for', file?.path, e);
@@ -219,110 +258,14 @@ export default class HenniPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const stored = await this.loadData();
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+		this.settings.imageExtensions = this.normalizeExtensions((stored as any)?.imageExtensions, DEFAULT_SETTINGS.imageExtensions);
+		this.settings.pdfExtensions = this.normalizeExtensions((stored as any)?.pdfExtensions, DEFAULT_SETTINGS.pdfExtensions);
+		this.settings.otherExtensions = this.normalizeExtensions((stored as any)?.otherExtensions, DEFAULT_SETTINGS.otherExtensions);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-}
-
-class ImageNoteSettingTab extends PluginSettingTab {
-	plugin: HenniPlugin;
-
-	constructor(app: App, plugin: HenniPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-		display(): void {
-			const {containerEl} = this;
-
-			containerEl.empty();
-
-			new Setting(containerEl)
-				.setName('Image Note Folder')
-				.setDesc('The folder where new image notes will be created.')
-				.addText(text => text
-					.setPlaceholder('Enter the folder name')
-					.setValue(this.plugin.settings.imageNoteFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.imageNoteFolder = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(containerEl)
-				.setName('PDF Note Folder')
-				.setDesc('The folder where new PDF notes will be created.')
-				.addText(text => text
-					.setPlaceholder('Enter the folder name')
-					.setValue(this.plugin.settings.pdfNoteFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.pdfNoteFolder = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(containerEl)
-				.setName('Auto-create notes on add')
-				.setDesc('Automatically create notes when adding images or PDFs to the vault.')
-				.addToggle(toggle => toggle
-					.setValue(this.plugin.settings.autoCreateOnFileAdd)
-					.onChange(async (value) => {
-						this.plugin.settings.autoCreateOnFileAdd = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(containerEl)
-				.setName('YAML property for file link')
-				.setDesc('Name of the YAML property that stores the linked file path (default: url).')
-				.addText(text => text
-					.setPlaceholder('url')
-					.setValue(this.plugin.settings.fileLinkProperty || 'url')
-					.onChange(async (value) => {
-						this.plugin.settings.fileLinkProperty = value?.trim() || 'url';
-						await this.plugin.saveSettings();
-					}));
-
-			// Actions
-			new Setting(containerEl)
-				.setName('Create Image Notes Now')
-				.setDesc('Scans images and creates notes in the configured image folder.')
-				.addButton(btn => btn
-					.setButtonText('Run')
-					.onClick(async () => {
-						try {
-                            // Directly call the command logic instead of using app.commands
-                            new Notice('Scanning images...');
-                            const images = this.app.vault.getFiles().filter(file => {
-                                return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(file.extension.toLowerCase());
-                            });
-                            const folder = this.plugin.settings.imageNoteFolder;
-                            for (const image of images) {
-                                try { await this.plugin.processMedia(image, 'image', folder); } catch (e) { console.error('Failed processing image', image.path, e); }
-                            }
-                            new Notice('Scan complete. Image notes updated.');
-						} catch (e) {
-							console.error('Failed to run image note creation command', e);
-						}
-					}));
-
-			new Setting(containerEl)
-				.setName('Create PDF Notes Now')
-				.setDesc('Scans PDFs and creates notes in the configured PDF folder.')
-				.addButton(btn => btn
-					.setButtonText('Run')
-					.onClick(async () => {
-						try {
-                            new Notice('Scanning PDFs...');
-                            const pdfs = this.app.vault.getFiles().filter(file => file.extension.toLowerCase() === 'pdf');
-                            const folder = this.plugin.settings.pdfNoteFolder;
-                            for (const pdf of pdfs) {
-                                try { await this.plugin.processMedia(pdf, 'pdf', folder); } catch (e) { console.error('Failed processing pdf', pdf.path, e); }
-                            }
-                            new Notice('Scan complete. PDF notes updated.');
-						} catch (e) {
-							console.error('Failed to run PDF note creation command', e);
-						}
-					}));
-		}
 }

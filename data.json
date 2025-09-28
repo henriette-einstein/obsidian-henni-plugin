@@ -1,3 +1,25 @@
 {
-  "imageNoteFolder": "60 Bibliothek/Bilder"
+  "imageNoteFolder": "60 Bibliothek/Bilder",
+  "pdfNoteFolder": "60 Bibliothek/PDFs",
+  "othetDigitalAssetsNoteFolder": "60 Bibliothek/MEDIA",
+  "autoCreateOnFileAdd": true,
+  "fileLinkProperty": "url",
+  "imageExtensions": [
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "bmp",
+    "svg",
+    "webp"
+  ],
+  "pdfExtensions": [
+    "pdf"
+  ],
+  "otherExtensions": [
+    "xlsx",
+    "docx",
+    "ppt",
+    "numbers"
+  ]
 }
