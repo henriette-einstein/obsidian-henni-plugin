@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A simple plugin for Obsidian.",
   "main": "main.js",
+  "type": "module",
   "scripts": {
     "dev": "node esbuild.config.mjs --watch",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production"
@@ -11,10 +12,15 @@
   "author": "Gemini",
   "license": "ISC",
   "devDependencies": {
+    "@types/node": "^24.5.2",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.19.2",
+    "esbuild-plugin-copy": "^2.1.1",
     "obsidian": "latest",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.4.168"
   }
 }

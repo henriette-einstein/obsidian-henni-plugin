@@ -1,4 +1,5 @@
 import { Notice, Plugin, TFile } from 'obsidian';
+import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfToJpg'; // Ensure the module is included
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
 
 // Helper to format created date
@@ -61,7 +62,7 @@ export default class HenniPlugin extends Plugin {
         return { baseName, notePath };
     }
 
-	// Utility: check if a note exists and whether it links to the given target via configured YAML property
+    // Utility: check if a note exists and whether it links to the given target via configured YAML property
     private async noteStatus(notePath: string, targetPath: string): Promise<'not-found' | 'matches' | 'exists-different'> {
         const abstract = this.app.vault.getAbstractFileByPath(notePath);
         if (!abstract) return 'not-found';
@@ -70,7 +71,7 @@ export default class HenniPlugin extends Plugin {
         try {
             const exists = await this.app.vault.adapter.exists(notePath);
             if (!exists) return 'not-found';
-        } catch (_) {}
+        } catch (_) { }
 
         const key = 'url';
         const compare = (raw: string | undefined): 'matches' | 'exists-different' => {
@@ -118,7 +119,7 @@ export default class HenniPlugin extends Plugin {
         return 'exists-different';
     }
 
-	// Utility: compute next available copy note path like `${folder}/${baseName} (N copy).md`
+    // Utility: compute next available copy note path like `${folder}/${baseName} (N copy).md`
     private getNextCopyNotePath(folder: string, baseName: string): string {
         let idx = 1;
         while (true) {
@@ -271,13 +272,22 @@ export default class HenniPlugin extends Plugin {
         }
     }
 
-	async onload() {
-		await this.loadSettings();
+    async onload() {
+        await this.loadSettings();
 
+        console.log('Loading PDF First Page Extractor plugin...');
 
-		this.addCommand({
-			id: 'scan-images-and-create-imagenote',
-			name: 'Scan images and create image notes',
+        try {
+            // Call the initialization function from the utility file
+            await initPdfWorker(this);
+        } catch (error) {
+            new Notice(error.message);
+            return; // Stop loading if the worker fails
+        }
+
+        this.addCommand({
+            id: 'scan-images-and-create-imagenote',
+            name: 'Scan images and create image notes',
             callback: async () => {
                 const extensions = this.getExtensions('image');
                 if (extensions.length === 0) {
@@ -294,10 +304,10 @@ export default class HenniPlugin extends Plugin {
             }
         });
 
-		// PDF scan and note creation
-		this.addCommand({
-			id: 'scan-pdfs-and-create-pdfnote',
-			name: 'Scan PDFs and create PDF notes',
+        // PDF scan and note creation
+        this.addCommand({
+            id: 'scan-pdfs-and-create-pdfnote',
+            name: 'Scan PDFs and create PDF notes',
             callback: async () => {
                 const extensions = this.getExtensions('pdf');
                 if (extensions.length === 0) {
@@ -314,15 +324,15 @@ export default class HenniPlugin extends Plugin {
             }
         });
 
-		// Auto-create notes when supported files are added to the vault
-		this.registerEvent(this.app.vault.on('create', async (file) => {
-			if (!(file instanceof TFile)) return;
-			if (!this.settings.autoCreateOnFileAdd) return;
-			const ext = file.extension;
-			const isImage = this.matchesExtension(ext, 'image');
-			const isPdf = this.matchesExtension(ext, 'pdf');
-			const isOther = this.matchesExtension(ext, 'other');
-			if (!isImage && !isPdf && !isOther) return; // ignore unsupported files (and avoids loops on created .md)
+        // Auto-create notes when supported files are added to the vault
+        this.registerEvent(this.app.vault.on('create', async (file) => {
+            if (!(file instanceof TFile)) return;
+            if (!this.settings.autoCreateOnFileAdd) return;
+            const ext = file.extension;
+            const isImage = this.matchesExtension(ext, 'image');
+            const isPdf = this.matchesExtension(ext, 'pdf');
+            const isOther = this.matchesExtension(ext, 'other');
+            if (!isImage && !isPdf && !isOther) return; // ignore unsupported files (and avoids loops on created .md)
 
             try {
                 if (isImage) {
@@ -347,60 +357,90 @@ export default class HenniPlugin extends Plugin {
             }
         }));
 
-		this.addSettingTab(new ImageNoteSettingTab(this.app, this));
+        this.addSettingTab(new ImageNoteSettingTab(this.app, this));
 
-		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-			if (!(file instanceof TFile)) return;
-			const kind = this.resolveKind(file);
-			if (!kind) return;
-			const folder = this.getTargetFolder(kind);
-			if (!folder) return;
-			const { notePath } = this.computePrimaryNotePath(file, kind, folder);
-			const abstract = this.app.vault.getAbstractFileByPath(notePath);
-			const existingNote = abstract instanceof TFile ? abstract : null;
+        this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+            if (!(file instanceof TFile)) return;
+            const kind = this.resolveKind(file);
+            if (!kind) return;
+            const folder = this.getTargetFolder(kind);
+            if (!folder) return;
+            const { notePath } = this.computePrimaryNotePath(file, kind, folder);
+            const abstract = this.app.vault.getAbstractFileByPath(notePath);
+            const existingNote = abstract instanceof TFile ? abstract : null;
 
-			if (!existingNote) {
-				menu.addItem(item => {
-					item.setTitle('Create media note');
-					item.onClick(async () => {
-						await this.processMedia(file, kind, folder);
-						const created = this.app.vault.getAbstractFileByPath(notePath);
-						if (created instanceof TFile) {
-							await this.app.workspace.getLeaf(false).openFile(created);
-						}
-					});
-				});
-			} else {
-				menu.addItem(item => {
-					item.setTitle('Open media note');
-					item.onClick(async () => {
-						await this.processMedia(file, kind, folder);
-						const updated = this.app.vault.getAbstractFileByPath(notePath);
-						if (updated instanceof TFile) {
-							await this.app.workspace.getLeaf(false).openFile(updated);
-						}
-					});
-				});
-			}
-		}));
-	}
+            if (!existingNote) {
+                menu.addItem(item => {
+                    item.setTitle('Create Media Note');
+                    item.onClick(async () => {
+                        await this.processMedia(file, kind, folder);
+                        const created = this.app.vault.getAbstractFileByPath(notePath);
+                        if (created instanceof TFile) {
+                            await this.app.workspace.getLeaf(false).openFile(created);
+                        }
+                    });
+                });
+            } else {
+                menu.addItem(item => {
+                    item.setTitle('Open Media Note');
+                    item.onClick(async () => {
+                        await this.processMedia(file, kind, folder);
+                        const updated = this.app.vault.getAbstractFileByPath(notePath);
+                        if (updated instanceof TFile) {
+                            await this.app.workspace.getLeaf(false).openFile(updated);
+                        }
+                    });
+                });
+            }
 
-	async loadSettings() {
-		const stored = await this.loadData();
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
-		this.settings.imageExtensions = this.normalizeExtensions((stored as any)?.imageExtensions, DEFAULT_SETTINGS.imageExtensions);
-		this.settings.pdfExtensions = this.normalizeExtensions((stored as any)?.pdfExtensions, DEFAULT_SETTINGS.pdfExtensions);
-		this.settings.otherExtensions = this.normalizeExtensions((stored as any)?.otherExtensions, DEFAULT_SETTINGS.otherExtensions);
-		this.settings.fileLinkProperty = typeof (stored as any)?.fileLinkProperty === 'string'
-			? (stored as any).fileLinkProperty.trim() || DEFAULT_SETTINGS.fileLinkProperty
-			: DEFAULT_SETTINGS.fileLinkProperty;
-		this.settings.imageTemplatePath = typeof (stored as any)?.imageTemplatePath === 'string' ? (stored as any).imageTemplatePath.trim() : '';
-		this.settings.pdfTemplatePath = typeof (stored as any)?.pdfTemplatePath === 'string' ? (stored as any).pdfTemplatePath.trim() : '';
-		this.settings.otherTemplatePath = typeof (stored as any)?.otherTemplatePath === 'string' ? (stored as any).otherTemplatePath.trim() : '';
-		this.clearTemplateCache();
-	}
+            if (kind === 'pdf') {
+                menu.addItem(item => {
+                    item.setTitle('Extract first page as image');
+                    item.onClick(async () => {
+                        await this.extractPdfFirstPage(file);
+                    });
+                });
+            }
+        }));
+    }
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    // Extract the first page of a PDF and save it as a JPG image in the same folder
+    private async extractPdfFirstPage(file: TFile) {
+        new Notice(`Extracting first page from ${file.basename}...`);
+
+        try {
+            const newFileName = `${file.basename}-page1.jpg`;
+            const folder = file.parent?.path || '';
+            const newFilePath = `${folder}/${newFileName}`;
+
+            const pdfBuffer = await this.app.vault.readBinary(file);
+            const imageBuffer = await getFirstPdfPageAsJpg(pdfBuffer, 0.9, 2.0);
+
+            await this.app.vault.createBinary(newFilePath, imageBuffer);
+            new Notice(`Successfully saved as ${newFileName}`);
+
+        } catch (error) {
+            console.error('PDF Extraction Error:', error);
+            new Notice('Failed to extract PDF page. See console for details.');
+        }
+    }
+
+    async loadSettings() {
+        const stored = await this.loadData();
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+        this.settings.imageExtensions = this.normalizeExtensions((stored as any)?.imageExtensions, DEFAULT_SETTINGS.imageExtensions);
+        this.settings.pdfExtensions = this.normalizeExtensions((stored as any)?.pdfExtensions, DEFAULT_SETTINGS.pdfExtensions);
+        this.settings.otherExtensions = this.normalizeExtensions((stored as any)?.otherExtensions, DEFAULT_SETTINGS.otherExtensions);
+        this.settings.fileLinkProperty = typeof (stored as any)?.fileLinkProperty === 'string'
+            ? (stored as any).fileLinkProperty.trim() || DEFAULT_SETTINGS.fileLinkProperty
+            : DEFAULT_SETTINGS.fileLinkProperty;
+        this.settings.imageTemplatePath = typeof (stored as any)?.imageTemplatePath === 'string' ? (stored as any).imageTemplatePath.trim() : '';
+        this.settings.pdfTemplatePath = typeof (stored as any)?.pdfTemplatePath === 'string' ? (stored as any).pdfTemplatePath.trim() : '';
+        this.settings.otherTemplatePath = typeof (stored as any)?.otherTemplatePath === 'string' ? (stored as any).otherTemplatePath.trim() : '';
+        this.clearTemplateCache();
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
 }

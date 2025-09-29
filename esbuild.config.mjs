@@ -1,4 +1,5 @@
 import esbuild from "esbuild";
+import {copy } from "esbuild-plugin-copy";
 import process from "process";
 import builtins from "builtin-modules";
 
@@ -38,6 +39,14 @@ const config = {
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outfile: "main.js",
+	plugins: [
+		copy({
+            resolveFrom: 'cwd',
+            assets: {
+                from: ['./node_modules/pdfjs-dist/build/pdf.worker.mjs'],
+                to: ['./pdf.worker.mjs'],
+            },
+        }),	]
 };
 
 if (process.argv[2] === "--watch") {
