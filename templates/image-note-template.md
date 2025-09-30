@@ -1,5 +1,6 @@
 ---
-{{fileLinkProperty}}: "[[{{url}}]]"
+{{urlProperty}}: "[[{{url}}]]"
+{{coverProperty}}: "[[{{cover}}]]"
 type: "[[Bilder]]"
 tags: type/image
 created: {{date}}

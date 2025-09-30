@@ -1,9 +1,10 @@
 import { Notice, Plugin, TFile } from 'obsidian';
-import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfToJpg'; // Ensure the module is included
+import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
+import { url } from 'inspector';
 
 // Helper to format created date
-const formatCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+const dateCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
 export type MediaKind = 'image' | 'pdf' | 'other';
 
@@ -51,7 +52,7 @@ export default class HenniPlugin extends Plugin {
     private getTargetFolder(kind: MediaKind): string | undefined {
         if (kind === 'image') return this.settings.imageNoteFolder;
         if (kind === 'pdf') return this.settings.pdfNoteFolder;
-        return this.settings.othetDigitalAssetsNoteFolder;
+        return this.settings.otherDigitalAssetsNoteFolder;
     }
 
     private computePrimaryNotePath(file: TFile, kind: MediaKind, folder: string): { baseName: string; notePath: string } {
@@ -211,20 +212,26 @@ export default class HenniPlugin extends Plugin {
 
     private async buildNoteContent(file: TFile, kind: MediaKind, duplicate = false): Promise<string> {
         const template = await this.loadTemplate(kind);
-        const created = formatCreated();
+        const created = dateCreated();
         const filePath = file.path;
-        const coverLink = kind === 'pdf' ? '[[To calculate]]' : '';
+        let coverLink = filePath
+        if (kind === 'pdf' ) {
+            const folder = this.settings.pdfFirstPageFolder;
+            coverLink = await this.extractPdfFirstPage(file, folder) || '';
+        }
         const urlProperty = this.settings.fileLinkProperty || 'url';
+        const coverProperty = this.settings.coverLinkProperty || 'cover';
         const replacements: Record<string, string> = {
             date: created,
+            urlProperty: urlProperty,
+            coverProperty: coverProperty,
+            cover: coverLink,
             url: filePath,
-            fileLinkProperty: urlProperty,
             duplicate: duplicate ? 'true' : 'false',
             basename: file.basename ?? '',
             extension: file.extension ?? '',
             folder: file.parent?.path ?? '',
             filesize: `${file.stat?.size ?? 0}`,
-            cover: coverLink,
         };
         let rendered = template;
         for (const key in replacements) {
@@ -348,7 +355,7 @@ export default class HenniPlugin extends Plugin {
                 }
 
                 if (isOther) {
-                    const folder = this.settings.othetDigitalAssetsNoteFolder;
+                    const folder = this.settings.otherDigitalAssetsNoteFolder;
                     if (!folder) return;
                     await this.processMedia(file, 'other', folder);
                 }
@@ -397,7 +404,8 @@ export default class HenniPlugin extends Plugin {
                 menu.addItem(item => {
                     item.setTitle('Extract first page as image');
                     item.onClick(async () => {
-                        await this.extractPdfFirstPage(file);
+                        const folder = this.settings.pdfFirstPageFolder;
+                        await this.extractPdfFirstPage(file, folder);
                     });
                 });
             }
@@ -405,23 +413,29 @@ export default class HenniPlugin extends Plugin {
     }
 
     // Extract the first page of a PDF and save it as a JPG image in the same folder
-    private async extractPdfFirstPage(file: TFile) {
+    private async extractPdfFirstPage(file: TFile, targetFolder: string): Promise<string> {
         new Notice(`Extracting first page from ${file.basename}...`);
 
         try {
             const newFileName = `${file.basename}-page1.jpg`;
-            const folder = file.parent?.path || '';
+            const folder = targetFolder? targetFolder:file.parent?.path || '';
+            await this.ensureFolderExists(folder);
             const newFilePath = `${folder}/${newFileName}`;
-
+            if (this.app.vault.getAbstractFileByPath(newFilePath)) {
+                new Notice(`File ${newFileName} already exists. Extraction skipped.`);
+                return newFilePath;
+            }
             const pdfBuffer = await this.app.vault.readBinary(file);
             const imageBuffer = await getFirstPdfPageAsJpg(pdfBuffer, 0.9, 2.0);
 
             await this.app.vault.createBinary(newFilePath, imageBuffer);
             new Notice(`Successfully saved as ${newFileName}`);
+            return newFilePath
 
         } catch (error) {
             console.error('PDF Extraction Error:', error);
             new Notice('Failed to extract PDF page. See console for details.');
+            return '';
         }
     }
 

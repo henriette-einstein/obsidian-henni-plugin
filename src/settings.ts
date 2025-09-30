@@ -5,9 +5,11 @@ import type { MediaKind } from './main';
 export interface HenniPluginSettings {
     imageNoteFolder: string;
     pdfNoteFolder: string;
-    othetDigitalAssetsNoteFolder?: string;
+    pdfFirstPageFolder: string;
+    otherDigitalAssetsNoteFolder?: string;
     autoCreateOnFileAdd: boolean;
     fileLinkProperty: string;
+    coverLinkProperty: string;
     imageExtensions: string[];
     pdfExtensions: string[];
     otherExtensions: string[];
@@ -19,9 +21,11 @@ export interface HenniPluginSettings {
 export const DEFAULT_SETTINGS: HenniPluginSettings = {
     imageNoteFolder: '60 Bibliothek/Bilder',
     pdfNoteFolder: '60 Bibliothek/PDFs',
-    othetDigitalAssetsNoteFolder: '60 Bibliothek/MediMedianMen',
+    pdfFirstPageFolder: '80 Medien/Bilder/PDF Covers',
+    otherDigitalAssetsNoteFolder: '60 Bibliothek/Medien',
     autoCreateOnFileAdd: false,
     fileLinkProperty: 'url',
+    coverLinkProperty: 'cover',
     imageExtensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'],
     pdfExtensions: ['pdf'],
     otherExtensions: ['xls', 'docx', 'ppt'],
@@ -58,11 +62,55 @@ export class ImageNoteSettingTab extends PluginSettingTab {
             component.inputEl.style.width = '320px';
         };
 
-        containerEl.createEl('h3', { text: 'Images' });
+        containerEl.createEl('h3', { text: 'General Settings' });
+
+        new Setting(containerEl)
+            .setName('Auto-create notes on add')
+            .setDesc('Automatically create notes when adding supported files to the vault.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoCreateOnFileAdd)
+                .onChange(async (value) => {
+                    this.plugin.settings.autoCreateOnFileAdd = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Media link property name')
+            .setDesc('YAML property that stores the media link (default: url).')
+            .addText(text => {
+                text
+                    .setPlaceholder(DEFAULT_SETTINGS.fileLinkProperty)
+                    .setValue(this.plugin.settings.fileLinkProperty || DEFAULT_SETTINGS.fileLinkProperty)
+                    .onChange(async (value) => {
+                        const trimmed = value?.trim() || DEFAULT_SETTINGS.fileLinkProperty;
+                        this.plugin.settings.fileLinkProperty = trimmed;
+                        this.plugin.clearTemplateCache();
+                        await this.plugin.saveSettings();
+                    });
+                setWide(text);
+            });
+
+        new Setting(containerEl)
+            .setName('Cover link property name')
+            .setDesc('YAML property that stores the link to the cover image (default: cover).')
+            .addText(text => {
+                text
+                    .setPlaceholder(DEFAULT_SETTINGS.coverLinkProperty)
+                    .setValue(this.plugin.settings.coverLinkProperty || DEFAULT_SETTINGS.coverLinkProperty)
+                    .onChange(async (value) => {
+                        const trimmed = value?.trim() || DEFAULT_SETTINGS.coverLinkProperty;
+                        this.plugin.settings.coverLinkProperty = trimmed;
+                        this.plugin.clearTemplateCache();
+                        await this.plugin.saveSettings();
+                    });
+                setWide(text);
+            });
+
+            containerEl.createEl('h3', { text: 'Images' });
 
         new Setting(containerEl)
             .setName('Image note folder')
-            .setDesc('Folder where new image notes will be created.')
+            .setDesc('Folder where new image notes will be created. Leave empty to use the path of the original image.')
             .addText(text => {
                 text
                     .setPlaceholder(DEFAULT_SETTINGS.imageNoteFolder)
@@ -150,13 +198,27 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('PDF note folder')
-            .setDesc('Folder where new PDF notes will be created.')
+            .setDesc('Folder where new PDF notes will be created. Leave empty to use the path of the original PDF.')
             .addText(text => {
                 text
                     .setPlaceholder(DEFAULT_SETTINGS.pdfNoteFolder)
                     .setValue(this.plugin.settings.pdfNoteFolder)
                     .onChange(async (value) => {
                         this.plugin.settings.pdfNoteFolder = value;
+                        await this.plugin.saveSettings();
+                    });
+                setWide(text);
+            });
+
+        new Setting(containerEl)
+            .setName('PDF first page image folder')
+            .setDesc('Folder where images of the first page of the PDF will be created. Leave empty to use the path of the original PDF.')
+            .addText(text => {
+                text
+                    .setPlaceholder(DEFAULT_SETTINGS.pdfFirstPageFolder)
+                    .setValue(this.plugin.settings.pdfFirstPageFolder)
+                    .onChange(async (value) => {
+                        this.plugin.settings.pdfFirstPageFolder = value;
                         await this.plugin.saveSettings();
                     });
                 setWide(text);
@@ -238,13 +300,13 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Target folder')
-            .setDesc('Folder where notes for other digital assets will be created.')
+            .setDesc('Folder where notes for other digital assets will be created. Leave empty to use the path of the original assets.')
             .addText(text => {
                 text
-                    .setPlaceholder(DEFAULT_SETTINGS.othetDigitalAssetsNoteFolder ?? '')
-                    .setValue(this.plugin.settings.othetDigitalAssetsNoteFolder || '')
+                    .setPlaceholder(DEFAULT_SETTINGS.otherDigitalAssetsNoteFolder ?? '')
+                    .setValue(this.plugin.settings.otherDigitalAssetsNoteFolder || '')
                     .onChange(async (value) => {
-                        this.plugin.settings.othetDigitalAssetsNoteFolder = value;
+                        this.plugin.settings.otherDigitalAssetsNoteFolder = value;
                         await this.plugin.saveSettings();
                     });
                 setWide(text);
@@ -306,7 +368,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                             new Notice('No extensions configured for other digital assets.');
                             return;
                         }
-                        const folder = this.plugin.settings.othetDigitalAssetsNoteFolder;
+                        const folder = this.plugin.settings.otherDigitalAssetsNoteFolder;
                         if (!folder) {
                             new Notice('No target folder configured for other digital assets.');
                             return;
@@ -326,33 +388,6 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                     }
                 }));
 
-        containerEl.createEl('h3', { text: 'General Settings' });
-
-        new Setting(containerEl)
-            .setName('Auto-create notes on add')
-            .setDesc('Automatically create notes when adding supported files to the vault.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.autoCreateOnFileAdd)
-                .onChange(async (value) => {
-                    this.plugin.settings.autoCreateOnFileAdd = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Media link property name')
-            .setDesc('YAML property that stores the media link (default: url).')
-            .addText(text => {
-                text
-                    .setPlaceholder(DEFAULT_SETTINGS.fileLinkProperty)
-                    .setValue(this.plugin.settings.fileLinkProperty || DEFAULT_SETTINGS.fileLinkProperty)
-                    .onChange(async (value) => {
-                        const trimmed = value?.trim() || DEFAULT_SETTINGS.fileLinkProperty;
-                        this.plugin.settings.fileLinkProperty = trimmed;
-                        this.plugin.clearTemplateCache();
-                        await this.plugin.saveSettings();
-                    });
-                setWide(text);
-            });
 
     }
 }

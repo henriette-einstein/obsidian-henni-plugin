@@ -1,5 +1,6 @@
 ---
-{{fileLinkProperty}}: "[[{{url}}]]"
+{{urlProperty}}: "[[{{url}}]]"
+{{coverProperty}}: "[[{{cover}}]]"
 type: "[[PDFs]]"
 tags: type/pdf
 created: {{date}}
@@ -8,6 +9,5 @@ basename: "{{basename}}"
 extension: "{{extension}}"
 folder: "{{folder}}"
 filesize: {{filesize}}
-cover: "[[{{cover}}]]"
 ---
 ![[{{url}}]]

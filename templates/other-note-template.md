@@ -1,5 +1,6 @@
 ---
-{{fileLinkProperty}}: "[[{{url}}]]"
+{{urlProperty}}: "[[{{url}}]]"
+{{coverProperty}}: "[[{{cover}}]]"
 type: "[[Medien]]"
 tags: type/media
 created: {{date}}
