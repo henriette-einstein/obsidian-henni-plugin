@@ -48,4 +48,4 @@ jobs:
             manifest.json
             styles.css
             pdf.worker.mjs
-            templates/*.md
+            templates
