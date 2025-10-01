@@ -36,7 +36,7 @@ jobs:
 
       - name: Package release archive
         run: |
-          zip -r obsidian-henni-plugin.zip main.js manifest.json styles.css pdf.worker.mjs templates
+          zip -r obsidian-henni-plugin.zip main.js manifest.json styles.css pdf.worker.mjs image-note-template.md pdf-note-template.md other-note-template.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

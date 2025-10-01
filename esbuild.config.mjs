@@ -47,10 +47,6 @@ const config = {
 					from: ['./node_modules/pdfjs-dist/build/pdf.worker.mjs'],
 					to: ['./pdf.worker.mjs'],
 				},
-				{
-					from: ['src/templates/**/*'],
-					to: ['./'],
-				},
 			],
 		}),
 	],
