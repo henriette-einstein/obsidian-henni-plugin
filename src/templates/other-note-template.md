@@ -3,9 +3,9 @@ type: "[[Medien]]"
 tags: [type/media, todo]
 created: {{date}}
 duplicate: {{duplicate}}
-basename: "{{basename}}"
-extension: "{{extension}}"
-folder: "{{folder}}"
+basename: {{basename}}
+extension: {{extension}}
+folder: {{folder}}
 filesize: {{filesize}}
 {{coverProperty}}: {{cover}}
 {{urlProperty}}: {{url}}
