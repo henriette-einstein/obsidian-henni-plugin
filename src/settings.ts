@@ -143,7 +143,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
         imageTemplateSetting.addText(text => {
             imageTemplateText = text;
             text
-                .setPlaceholder(this.plugin.getDefaultTemplatePath('image'))
+                .setPlaceholder('Leave empty to use the bundled image template')
                 .setValue(this.plugin.settings.imageTemplatePath || '')
                 .onChange(async (value) => {
                     this.plugin.settings.imageTemplatePath = value?.trim() || '';
@@ -245,7 +245,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
         pdfTemplateSetting.addText(text => {
             pdfTemplateText = text;
             text
-                .setPlaceholder(this.plugin.getDefaultTemplatePath('pdf'))
+                .setPlaceholder('Leave empty to use the bundled PDF template')
                 .setValue(this.plugin.settings.pdfTemplatePath || '')
                 .onChange(async (value) => {
                     this.plugin.settings.pdfTemplatePath = value?.trim() || '';
@@ -333,7 +333,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
         otherTemplateSetting.addText(text => {
             otherTemplateText = text;
             text
-                .setPlaceholder(this.plugin.getDefaultTemplatePath('other'))
+                .setPlaceholder('Leave empty to use the bundled template')
                 .setValue(this.plugin.settings.otherTemplatePath || '')
                 .onChange(async (value) => {
                     this.plugin.settings.otherTemplatePath = value?.trim() || '';

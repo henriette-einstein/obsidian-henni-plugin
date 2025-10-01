@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
-import {copy } from "esbuild-plugin-copy";
 import process from "process";
+import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import builtins from "builtin-modules";
 
 const banner =
@@ -11,6 +12,26 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+
+const require = createRequire(import.meta.url);
+
+const inlinePdfWorkerPlugin = {
+	name: "inline-pdf-worker",
+	setup(build) {
+		const resolvedWorkerPath = require.resolve("pdfjs-dist/build/pdf.worker.mjs");
+		build.onResolve({ filter: /pdf\.worker\.mjs$/ }, () => ({
+			path: resolvedWorkerPath,
+		}));
+
+		build.onLoad({ filter: /pdf\.worker\.mjs$/ }, async () => {
+			const source = await fs.readFile(resolvedWorkerPath, "utf8");
+			return {
+				contents: `export default ${JSON.stringify(source)};`,
+				loader: "js",
+			};
+		});
+	},
+};
 
 const config = {
 	banner: {
@@ -39,17 +60,10 @@ const config = {
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outfile: "main.js",
-	plugins: [
-		copy({
-			resolveFrom: 'cwd',
-			assets: [
-				{
-					from: ['./node_modules/pdfjs-dist/build/pdf.worker.mjs'],
-					to: ['./pdf.worker.mjs'],
-				},
-			],
-		}),
-	],
+	loader: {
+		".md": "text",
+	},
+	plugins: [inlinePdfWorkerPlugin],
 };
 
 if (process.argv[2] === "--watch") {

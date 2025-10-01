@@ -1,7 +1,9 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
-import { url } from 'inspector';
+import imageTemplateContent from './templates/image-note-template.md';
+import otherTemplateContent from './templates/other-note-template.md';
+import pdfTemplateContent from './templates/pdf-note-template.md';
 
 // Helper to format created date
 const dateCreated = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -12,6 +14,11 @@ export default class HenniPlugin extends Plugin {
     settings: HenniPluginSettings;
     private ensuredFolders: Set<string> = new Set();
     private templateCache: Partial<Record<MediaKind, string>> = {};
+    private readonly bundledTemplates: Record<MediaKind, string> = {
+        image: imageTemplateContent,
+        pdf: pdfTemplateContent,
+        other: otherTemplateContent,
+    };
 
     private normalizeExtensions(value: unknown, fallback: string[]): string[] {
         const source = Array.isArray(value)
@@ -154,25 +161,6 @@ export default class HenniPlugin extends Plugin {
 
     // Utility: build note content for a media file
 
-    private defaultTemplate(): string {
-        return `---\ncreated: {{date}}\nduplicate: {{duplicate}}\nbasename: "{{basename}}"\nextension: "{{extension}}"\nfolder: "{{folder}}"\nfilesize: {{filesize}}\ncover: {{cover}}\n{{fileLinkProperty}}: {{url}}\n---\n![[{{url}}]]\n`;
-    }
-
-    private getTemplateDir(): string {
-        const configDir = (this.app.vault as any).configDir ?? '.obsidian';
-        return `${configDir}/plugins/${this.manifest.id}`;
-    }
-
-    public getDefaultTemplatePath(kind: MediaKind): string {
-        const dir = this.getTemplateDir();
-        const filename = kind === 'image'
-            ? 'image-note-template.md'
-            : kind === 'pdf'
-                ? 'pdf-note-template.md'
-                : 'other-note-template.md';
-        return `${dir}/${filename}`;
-    }
-
     private getUserTemplatePath(kind: MediaKind): string | undefined {
         const raw = kind === 'image'
             ? this.settings.imageTemplatePath
@@ -187,17 +175,16 @@ export default class HenniPlugin extends Plugin {
         const cached = this.templateCache[kind];
         if (cached) return cached;
         const userPath = this.getUserTemplatePath(kind);
-        const candidates = userPath ? [userPath, this.getDefaultTemplatePath(kind)] : [this.getDefaultTemplatePath(kind)];
-        for (const path of candidates) {
+        if (userPath) {
             try {
-                const content = await this.app.vault.adapter.read(path);
+                const content = await this.app.vault.adapter.read(userPath);
                 this.templateCache[kind] = content;
                 return content;
             } catch (error) {
-                console.error(`Failed to read ${kind} media note template at ${path}.`, error);
+                console.error(`Failed to read custom ${kind} template at ${userPath}.`, error);
             }
         }
-        const fallback = this.defaultTemplate();
+        const fallback = this.bundledTemplates[kind];
         this.templateCache[kind] = fallback;
         return fallback;
     }
@@ -286,8 +273,8 @@ export default class HenniPlugin extends Plugin {
 
         try {
             // Call the initialization function from the utility file
-            await initPdfWorker(this);
-        } catch (error) {
+            await initPdfWorker();
+        } catch (error: any) {
             new Notice(error.message);
             return; // Stop loading if the worker fails
         }

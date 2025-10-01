@@ -1,19 +1,17 @@
-import { Plugin, Notice } from 'obsidian';
 import * as pdfjs from 'pdfjs-dist/build/pdf.mjs';
+import workerSource from 'pdfjs-dist/build/pdf.worker.mjs';
 
 /**
- * Initializes the PDF.js worker to bypass CORS issues.
- * @param plugin The instance of the plugin.
+ * Initializes the PDF.js worker so rendering works without touching the filesystem.
  */
-export async function initPdfWorker(plugin: Plugin): Promise<void> {
-    const workerPath = `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}/pdf.worker.mjs`;
+export async function initPdfWorker(): Promise<void> {
     try {
-        const workerBlob = new Blob([await plugin.app.vault.adapter.read(workerPath)], { type: 'text/javascript' });
+        const workerBlob = new Blob([workerSource], { type: 'text/javascript' });
         pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
     } catch (error) {
         console.error("Failed to load PDF.js worker:", error);
         // Throw the error so the main file can handle the user notification
-        throw new Error("PDF worker script not found or could not be loaded.");
+        throw new Error("PDF worker script could not be inlined.");
     }
 }
 

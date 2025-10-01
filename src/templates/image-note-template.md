@@ -1,13 +1,14 @@
 ---
-{{urlProperty}}: "[[{{url}}]]"
-{{coverProperty}}: "[[{{cover}}]]"
-type: "[[Medien]]"
-tags: type/media
+type: "[[Bilder]]"
+tags: [type/image, todo]
 created: {{date}}
 duplicate: {{duplicate}}
 basename: "{{basename}}"
 extension: "{{extension}}"
 folder: "{{folder}}"
 filesize: {{filesize}}
+{{coverProperty}}: {{cover}}
+{{urlProperty}}: {{url}}
 ---
-[[{{url}}]]
+
+![[{{url}}]]
