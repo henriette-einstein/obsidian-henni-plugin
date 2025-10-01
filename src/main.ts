@@ -160,7 +160,7 @@ export default class HenniPlugin extends Plugin {
 
     private getTemplateDir(): string {
         const configDir = (this.app.vault as any).configDir ?? '.obsidian';
-        return `${configDir}/plugins/${this.manifest.id}/templates`;
+        return `${configDir}/plugins/${this.manifest.id}`;
     }
 
     public getDefaultTemplatePath(kind: MediaKind): string {

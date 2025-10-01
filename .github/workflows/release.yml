@@ -46,5 +46,13 @@ jobs:
           name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           fail_on_unmatched_files: true
-          files: main.js manifest.json styles.css pdf.worker.mjs templates/image-note-template.md templates/pdf-note-template.md templates/other-note-template.md obsidian-henni-plugin.zip
+          files: |
+            main.js 
+            manifest.json 
+            styles.css 
+            pdf.worker.mjs 
+            image-note-template.md
+            pdf-note-template.md
+            other-note-template.md
+            obsidian-henni-plugin.zip
         

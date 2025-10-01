@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 main.js
 pdf.worker.mjs
+image-note-template.md
+pdf-note-template.md
+other-note-template.md

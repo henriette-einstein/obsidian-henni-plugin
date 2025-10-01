@@ -41,12 +41,19 @@ const config = {
 	outfile: "main.js",
 	plugins: [
 		copy({
-            resolveFrom: 'cwd',
-            assets: {
-                from: ['./node_modules/pdfjs-dist/build/pdf.worker.mjs'],
-                to: ['./pdf.worker.mjs'],
-            },
-        }),	]
+			resolveFrom: 'cwd',
+			assets: [
+				{
+					from: ['./node_modules/pdfjs-dist/build/pdf.worker.mjs'],
+					to: ['./pdf.worker.mjs'],
+				},
+				{
+					from: ['src/templates/**/*'],
+					to: ['./'],
+				},
+			],
+		}),
+	],
 };
 
 if (process.argv[2] === "--watch") {
