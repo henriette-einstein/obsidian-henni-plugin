@@ -1,9 +1,11 @@
 {
   "imageNoteFolder": "60 Bibliothek/Bilder",
   "pdfNoteFolder": "60 Bibliothek/PDFs",
-  "othetDigitalAssetsNoteFolder": "60 Bibliothek/Medien",
+  "pdfFirstPageFolder": "80 Medien/Bilder/PDF Covers",
+  "otherDigitalAssetsNoteFolder": "60 Bibliothek/Medien",
   "autoCreateOnFileAdd": false,
   "fileLinkProperty": "url",
+  "coverLinkProperty": "cover",
   "imageExtensions": [
     "jpg",
     "jpeg",
@@ -27,5 +29,6 @@
   ],
   "imageTemplatePath": "",
   "pdfTemplatePath": "",
-  "otherTemplatePath": ""
+  "otherTemplatePath": "",
+  "othetDigitalAssetsNoteFolder": "60 Bibliothek/Medien"
 }

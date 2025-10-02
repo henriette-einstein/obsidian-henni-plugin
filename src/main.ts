@@ -81,7 +81,8 @@ export default class HenniPlugin extends Plugin {
             if (!exists) return 'not-found';
         } catch (_) { }
 
-        const key = 'url';
+        const key = (this.settings.fileLinkProperty || 'url').trim() || 'url';
+        const normalizedKey = key.toLowerCase();
         const compare = (raw: string | undefined): 'matches' | 'exists-different' => {
             if (!raw) return 'exists-different';
             const val = raw.trim().replace(/^"|"$/g, "");
@@ -114,7 +115,7 @@ export default class HenniPlugin extends Plugin {
             const yamlMatch = content.match(/^---[\s\S]*?---/);
             if (yamlMatch) {
                 const yaml = yamlMatch[0];
-                const line = yaml.split('\n').find(l => l.replace(/^\s+/, '').toLowerCase().startsWith(`${key.toLowerCase()}:`));
+                const line = yaml.split('\n').find(l => l.replace(/^\s+/, '').toLowerCase().startsWith(`${normalizedKey}:`));
                 if (line) {
                     const propVal = line.substring(line.indexOf(':') + 1).trim();
                     const res = compare(propVal);
@@ -131,7 +132,7 @@ export default class HenniPlugin extends Plugin {
     private getNextCopyNotePath(folder: string, baseName: string): string {
         let idx = 1;
         while (true) {
-            const candidate = `${folder}/${baseName} (${idx} copy).md`;
+            const candidate = `${folder}/${baseName} (copy ${idx}).md`;
             if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate;
             idx++;
         }
@@ -197,6 +198,38 @@ export default class HenniPlugin extends Plugin {
         }
     }
 
+    public async getIndexNotePath(file: TFile): Promise<string | null> {
+        const kind = this.resolveKind(file);
+        if (!kind) return null;
+        const folder = this.getTargetFolder(kind);
+        if (!folder) return null;
+
+        const { baseName, notePath } = this.computePrimaryNotePath(file, kind, folder);
+        const primaryStatus = await this.noteStatus(notePath, file.path);
+        if (primaryStatus === 'matches') {
+            return notePath;
+        }
+
+        const candidates = this.app.vault.getFiles().filter(candidate => {
+            if (candidate.parent?.path !== folder) return false;
+            if (candidate.path === notePath) return true;
+            if (candidate.basename === baseName) return true;
+            return candidate.basename.startsWith(`${baseName} (`);
+        });
+
+        for (const candidate of candidates) {
+            if (candidate.path === notePath) {
+                continue;
+            }
+            const status = await this.noteStatus(candidate.path, file.path);
+            if (status === 'matches') {
+                return candidate.path;
+            }
+        }
+
+        return null;
+    }
+
     private async buildNoteContent(file: TFile, kind: MediaKind, duplicate = false): Promise<string> {
         const template = await this.loadTemplate(kind);
         const created = dateCreated();
@@ -232,10 +265,28 @@ export default class HenniPlugin extends Plugin {
 
     // Utility: create or copy a note for a media file (shared by commands and event handler)
     public async processMedia(file: TFile, kind: MediaKind, targetFolder: string): Promise<void> {
+        if (!targetFolder || !targetFolder.trim()) {    
+            targetFolder = file.parent?.path || '';
+        }
         await this.ensureFolderExists(targetFolder);
         const { baseName, notePath } = this.computePrimaryNotePath(file, kind, targetFolder);
 
         const status = await this.noteStatus(notePath, file.path);
+        if (status === 'matches') {
+            return; // already correct
+        }
+
+        const existingMatchPath = await this.getIndexNotePath(file);
+        if (existingMatchPath) {
+            const existingNote = this.app.vault.getAbstractFileByPath(existingMatchPath);
+            if (existingNote instanceof TFile) {
+                const isCopy = existingMatchPath !== notePath;
+                const content = await this.buildNoteContent(file, kind, isCopy);
+                await this.app.vault.modify(existingNote, content);
+                return;
+            }
+        }
+
         if (status === 'not-found') {
             try {
                 const content = await this.buildNoteContent(file, kind, false);
@@ -246,9 +297,6 @@ export default class HenniPlugin extends Plugin {
                 }
             }
             return;
-        }
-        if (status === 'matches') {
-            return; // already correct
         }
         for (let attempts = 0; attempts < 100; attempts++) {
             const copyPath = this.getNextCopyNotePath(targetFolder, baseName);
@@ -356,32 +404,47 @@ export default class HenniPlugin extends Plugin {
         this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
             if (!(file instanceof TFile)) return;
             const kind = this.resolveKind(file);
-            if (!kind) return;
+            if (!kind) {
+                return;
+            }
             const folder = this.getTargetFolder(kind);
-            if (!folder) return;
-            const { notePath } = this.computePrimaryNotePath(file, kind, folder);
-            const abstract = this.app.vault.getAbstractFileByPath(notePath);
-            const existingNote = abstract instanceof TFile ? abstract : null;
+            if (!folder) {
+                new Notice(`No target folder configured for ${kind} notes.`);
+                return;
+            }
+            const { baseName, notePath } = this.computePrimaryNotePath(file, kind, folder);
 
-            if (!existingNote) {
+            const candidateExists = this.app.vault.getFiles().some(candidate => {
+                if (candidate.parent?.path !== folder) return false;
+                if (candidate.path === notePath) return true;
+                if (candidate.basename === baseName) return true;
+                return candidate.basename.startsWith(`${baseName} (`);
+            });
+
+            if (candidateExists) {
                 menu.addItem(item => {
-                    item.setTitle('Create Media Note');
+                    item.setTitle('Open Media Note');
                     item.onClick(async () => {
-                        await this.processMedia(file, kind, folder);
-                        const created = this.app.vault.getAbstractFileByPath(notePath);
-                        if (created instanceof TFile) {
-                            await this.app.workspace.getLeaf(false).openFile(created);
+                        const pathToOpen = await this.getIndexNotePath(file);
+                        if (!pathToOpen) {
+                            new Notice('No media note found for this file.');
+                            return;
+                        }
+                        const target = this.app.vault.getAbstractFileByPath(pathToOpen);
+                        if (target instanceof TFile) {
+                            await this.app.workspace.getLeaf(false).openFile(target);
                         }
                     });
                 });
             } else {
                 menu.addItem(item => {
-                    item.setTitle('Open Media Note');
+                    item.setTitle('Create Media Note');
                     item.onClick(async () => {
                         await this.processMedia(file, kind, folder);
-                        const updated = this.app.vault.getAbstractFileByPath(notePath);
-                        if (updated instanceof TFile) {
-                            await this.app.workspace.getLeaf(false).openFile(updated);
+                        const pathToOpen = await this.getIndexNotePath(file);
+                        const target = pathToOpen ? this.app.vault.getAbstractFileByPath(pathToOpen) : this.app.vault.getAbstractFileByPath(notePath);
+                        if (target instanceof TFile) {
+                            await this.app.workspace.getLeaf(false).openFile(target);
                         }
                     });
                 });
@@ -392,7 +455,7 @@ export default class HenniPlugin extends Plugin {
                     item.setTitle('Extract first page as image');
                     item.onClick(async () => {
                         const folder = this.settings.pdfFirstPageFolder;
-                        await this.extractPdfFirstPage(file, folder);
+                        await this.extractPdfFirstPage(file, folder,true);
                     });
                 });
             }
@@ -400,9 +463,10 @@ export default class HenniPlugin extends Plugin {
     }
 
     // Extract the first page of a PDF and save it as a JPG image in the same folder
-    private async extractPdfFirstPage(file: TFile, targetFolder: string): Promise<string> {
+    private async extractPdfFirstPage(file: TFile, targetFolder: string, verbose: boolean = false): Promise<string> {
+        if (verbose) {
         new Notice(`Extracting first page from ${file.basename}...`);
-
+        }
         try {
             const newFileName = `${file.basename}-page1.jpg`;
             const folder = targetFolder? targetFolder:file.parent?.path || '';
@@ -416,7 +480,9 @@ export default class HenniPlugin extends Plugin {
             const imageBuffer = await getFirstPdfPageAsJpg(pdfBuffer, 0.9, 2.0);
 
             await this.app.vault.createBinary(newFilePath, imageBuffer);
-            new Notice(`Successfully saved as ${newFileName}`);
+            if (verbose) {
+                new Notice(`Successfully saved as ${newFileName}`);
+            }
             return newFilePath
 
         } catch (error) {

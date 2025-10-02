@@ -6,7 +6,7 @@ export interface HenniPluginSettings {
     imageNoteFolder: string;
     pdfNoteFolder: string;
     pdfFirstPageFolder: string;
-    otherDigitalAssetsNoteFolder?: string;
+    otherDigitalAssetsNoteFolder: string;
     autoCreateOnFileAdd: boolean;
     fileLinkProperty: string;
     coverLinkProperty: string;
@@ -138,7 +138,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const imageTemplateSetting = new Setting(containerEl)
             .setName('Image template path')
-            .setDesc('Optional vault-relative path to the template used for image notes. Leave empty to use the plugin default.');
+            .setDesc('Optional vault-relative path to the template used for image notes. Leave empty to store in the same folder as the image.');
         let imageTemplateText: TextComponent;
         imageTemplateSetting.addText(text => {
             imageTemplateText = text;
@@ -240,7 +240,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const pdfTemplateSetting = new Setting(containerEl)
             .setName('PDF template path')
-            .setDesc('Optional vault-relative path to the template used for PDF notes. Leave empty to use the plugin default.');
+            .setDesc('Optional vault-relative path to the template used for PDF notes. Leave empty to store in the same folder as the PDF.');
         let pdfTemplateText: TextComponent;
         pdfTemplateSetting.addText(text => {
             pdfTemplateText = text;
@@ -328,7 +328,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const otherTemplateSetting = new Setting(containerEl)
             .setName('Other assets template path')
-            .setDesc('Optional vault-relative path to the template used for other digital asset notes. Leave empty to use the plugin default.');
+            .setDesc('Optional vault-relative path to the template used for other digital asset notes. Leave empty to store in the same folder as the asset.');
         let otherTemplateText: TextComponent;
         otherTemplateSetting.addText(text => {
             otherTemplateText = text;
@@ -369,10 +369,6 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                             return;
                         }
                         const folder = this.plugin.settings.otherDigitalAssetsNoteFolder;
-                        if (!folder) {
-                            new Notice('No target folder configured for other digital assets.');
-                            return;
-                        }
                         new Notice('Scanning digital assets...');
                         const assets = this.app.vault.getFiles().filter(file => matchesExtension(file.extension, extensions));
                         for (const asset of assets) {
