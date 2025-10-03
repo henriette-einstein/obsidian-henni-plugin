@@ -138,7 +138,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const imageTemplateSetting = new Setting(containerEl)
             .setName('Image template path')
-            .setDesc('Optional vault-relative path to the template used for image notes. Leave empty to store in the same folder as the image.');
+            .setDesc('Optional vault-relative path to the template used for image notes. Leave empty to use the bundled templates.');
         let imageTemplateText: TextComponent;
         imageTemplateSetting.addText(text => {
             imageTemplateText = text;
@@ -240,7 +240,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const pdfTemplateSetting = new Setting(containerEl)
             .setName('PDF template path')
-            .setDesc('Optional vault-relative path to the template used for PDF notes. Leave empty to store in the same folder as the PDF.');
+            .setDesc('Optional vault-relative path to the template used for PDF notes. Leave empty to use the bundled template.');
         let pdfTemplateText: TextComponent;
         pdfTemplateSetting.addText(text => {
             pdfTemplateText = text;
@@ -328,7 +328,7 @@ export class ImageNoteSettingTab extends PluginSettingTab {
 
         const otherTemplateSetting = new Setting(containerEl)
             .setName('Other assets template path')
-            .setDesc('Optional vault-relative path to the template used for other digital asset notes. Leave empty to store in the same folder as the asset.');
+            .setDesc('Optional vault-relative path to the template used for other digital asset notes. Leave empty to use the bundled template.');
         let otherTemplateText: TextComponent;
         otherTemplateSetting.addText(text => {
             otherTemplateText = text;

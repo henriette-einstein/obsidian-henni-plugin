@@ -3,7 +3,7 @@
   "pdfNoteFolder": "60 Bibliothek/PDFs",
   "pdfFirstPageFolder": "80 Medien/Bilder/PDF Covers",
   "otherDigitalAssetsNoteFolder": "60 Bibliothek/Medien",
-  "autoCreateOnFileAdd": false,
+  "autoCreateOnFileAdd": true,
   "fileLinkProperty": "url",
   "coverLinkProperty": "cover",
   "imageExtensions": [
