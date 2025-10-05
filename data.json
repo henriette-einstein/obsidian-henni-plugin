@@ -3,7 +3,7 @@
   "pdfNoteFolder": "60 Bibliothek/PDFs",
   "pdfFirstPageFolder": "80 Medien/Bilder/PDF Covers",
   "otherDigitalAssetsNoteFolder": "60 Bibliothek/Medien",
-  "autoCreateOnFileAdd": true,
+  "autoCreateOnFileAdd": false,
   "fileLinkProperty": "url",
   "coverLinkProperty": "cover",
   "imageExtensions": [
@@ -20,15 +20,10 @@
   ],
   "otherExtensions": [
     "xls",
-    "xlsx",
-    "doc",
     "docx",
-    "ppt",
-    "pptx",
-    "numbers"
+    "ppt"
   ],
   "imageTemplatePath": "",
   "pdfTemplatePath": "",
-  "otherTemplatePath": "",
-  "othetDigitalAssetsNoteFolder": "60 Bibliothek/Medien"
+  "otherTemplatePath": ""
 }
