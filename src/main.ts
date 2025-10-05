@@ -470,12 +470,16 @@ export default class HenniPlugin extends Plugin {
         try {
             const newFileName = `${file.basename}-page1.jpg`;
             const folder = targetFolder? targetFolder:file.parent?.path || '';
-            await this.ensureFolderExists(folder);
             const newFilePath = `${folder}/${newFileName}`;
-            if (this.app.vault.getAbstractFileByPath(newFilePath)) {
-                new Notice(`File ${newFileName} already exists. Extraction skipped.`);
+
+            if (await this.app.vault.adapter.exists?.(newFilePath)) {
+                if (verbose) {
+                    new Notice(`File ${newFileName} already exists. Using existing image.`);
+                }
                 return newFilePath;
             }
+
+            await this.ensureFolderExists(folder);
             const pdfBuffer = await this.app.vault.readBinary(file);
             const imageBuffer = await getFirstPdfPageAsJpg(pdfBuffer, 0.9, 2.0);
 
