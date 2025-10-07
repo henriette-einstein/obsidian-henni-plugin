@@ -1,6 +1,6 @@
 ---
 type: "[[Bilder]]"
-tags: [type/image, todo]
+tags: [type/image]
 created: {{date}}
 duplicate: {{duplicate}}
 basename: {{basename}}
@@ -9,5 +9,18 @@ folder: {{folder}}
 filesize: {{filesize}}
 {{coverProperty}}: {{cover}}
 {{urlProperty}}: {{url}}
+{exif}
+camera: {{exifCameraMake}} {{exifCameraModel}}
+lens: {{exifLensModel}}
+captured: {{exifTakenAt}}
+exposure_time: {{exifExposureTime}}s 
+fstop: {{exifFNumber}}
+iso: {{exifIso}}
+focal_Length: {{exifFocalLength}}mm
+focal_length_35mm: {{exifFocalLength35mm}}mm
+exiflocation: [{{exifLatitude}}, {{exifLongitude}}]
+altitude: {{exifAltitude}}m
+{/exif}
 ---
 ![[{{url}}]]
+

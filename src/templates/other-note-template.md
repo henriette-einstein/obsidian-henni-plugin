@@ -1,6 +1,6 @@
 ---
 type: "[[Medien]]"
-tags: [type/media, todo]
+tags: [type/media]
 created: {{date}}
 duplicate: {{duplicate}}
 basename: {{basename}}

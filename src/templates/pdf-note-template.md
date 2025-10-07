@@ -1,6 +1,6 @@
 ---
 type: "[[PDFs]]"
-tags: [type/pdf, todo]
+tags: [type/pdf]
 created: {{date}}
 duplicate: {{duplicate}}
 basename: {{basename}}

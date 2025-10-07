@@ -1,5 +1,6 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
+import { extractExifData, type ExifSummary } from './exifUtils';
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
 import imageTemplateContent from './templates/image-note-template.md';
 import otherTemplateContent from './templates/other-note-template.md';
@@ -234,13 +235,30 @@ export default class HenniPlugin extends Plugin {
         const template = await this.loadTemplate(kind);
         const created = dateCreated();
         const filePath = file.path;
-        let coverLink = filePath
+        let coverLink = filePath;
+        let exifData: ExifSummary | null = null;
+
         if (kind === 'pdf' ) {
             const folder = this.settings.pdfFirstPageFolder;
             coverLink = await this.extractPdfFirstPage(file, folder) || '';
+        } else if (kind === 'image') {
+            try {
+                const binary = await this.app.vault.readBinary(file);
+                exifData = await extractExifData(binary);
+            } catch (error) {
+                console.warn('Failed to load EXIF data for', file.path, error);
+            }
         }
         const urlProperty = this.settings.fileLinkProperty || 'url';
         const coverProperty = this.settings.coverLinkProperty || 'cover';
+        let exifJson = '';
+        if (exifData?.raw) {
+            try {
+                exifJson = JSON.stringify(exifData.raw);
+            } catch (error) {
+                console.warn('Failed to stringify EXIF data for', file.path, error);
+            }
+        }
         const replacements: Record<string, string> = {
             date: created,
             urlProperty: urlProperty,
@@ -252,8 +270,21 @@ export default class HenniPlugin extends Plugin {
             extension: file.extension ?? '',
             folder: file.parent?.path ?? '',
             filesize: `${file.stat?.size ?? 0}`,
+            exifJson,
+            exifCameraMaker: exifData?.maker ?? '',
+            exifCameraModel: exifData?.model ?? '',
+            exifLensModel: exifData?.lensModel ?? '',
+            exifTakenAt: exifData?.takenAt ?? '',
+            exifExposureTime: exifData?.exposureTime != null ? `${exifData.exposureTime}` : '',
+            exifFNumber: exifData?.fNumber != null ? `${exifData.fNumber}` : '',
+            exifIso: exifData?.iso != null ? `${exifData.iso}` : '',
+            exifFocalLength: exifData?.focalLength != null ? `${exifData.focalLength}` : '',
+            exifFocalLength35mm: exifData?.focalLengthIn35mm != null ? `${exifData.focalLengthIn35mm}` : '',
+            exifLatitude: exifData?.latitude != null ? `${exifData.latitude}` : '',
+            exifLongitude: exifData?.longitude != null ? `${exifData.longitude}` : '',
+            exifAltitude: exifData?.altitude != null ? `${exifData.altitude}` : '',
         };
-        let rendered = template;
+        let rendered = this.applyExifBlock(template, replacements);
         for (const key in replacements) {
             if (!Object.prototype.hasOwnProperty.call(replacements, key)) continue;
             const value = replacements[key];
@@ -261,6 +292,48 @@ export default class HenniPlugin extends Plugin {
             rendered = rendered.replace(regex, value);
         }
         return rendered;
+    }
+
+    private applyExifBlock(template: string, replacements: Record<string, string>): string {
+        return template.replace(/\{exif\}([\s\S]*?)\{\/exif\}/g, (_match, block: string) => {
+            const lines = block.split('\n');
+            const kept: string[] = [];
+            const pending: string[] = [];
+            let hasData = false;
+
+            for (const line of lines) {
+                const matches = Array.from(line.matchAll(/\{\{([^}]+)\}\}/g));
+                if (matches.length === 0) {
+                    if (hasData) {
+                        kept.push(line);
+                    } else {
+                        pending.push(line);
+                    }
+                    continue;
+                }
+
+                const allFilled = matches.every(([, rawKey]) => {
+                    const key = rawKey.trim();
+                    const value = replacements[key];
+                    return typeof value === 'string' && value.trim().length > 0;
+                });
+
+                if (allFilled) {
+                    if (!hasData) {
+                        kept.push(...pending);
+                        pending.length = 0;
+                    }
+                    hasData = true;
+                    kept.push(line);
+                }
+            }
+
+            if (!hasData) {
+                return '';
+            }
+
+            return kept.join('\n').replace(/\n+$/g, '');
+        });
     }
 
     // Utility: create or copy a note for a media file (shared by commands and event handler)
