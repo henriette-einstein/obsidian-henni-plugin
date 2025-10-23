@@ -64,11 +64,21 @@ export default class HenniPlugin extends Plugin {
     }
 
     private computePrimaryNotePath(file: TFile, kind: MediaKind, folder: string): { baseName: string; notePath: string } {
-        const prefixSource = file.extension ? file.extension : kind;
-        const prefix = prefixSource.toUpperCase();
-        const baseName = `${prefix}-${file.basename}`;
-        const notePath = `${folder}/${baseName}.md`;
-        return { baseName, notePath };
+        if (this.settings.useSuffix) {
+            const suffixSource = file.extension ? file.extension : kind;
+            const suffix = suffixSource.toLowerCase();
+            const baseName = `${file.basename}.${suffix}`;
+            const notePath = `${folder}/${baseName}.md`;
+            
+            return { baseName, notePath };
+        } else {
+            const prefixSource = file.extension ? file.extension : kind;
+            const prefix = prefixSource.toUpperCase();
+            const suffix = prefixSource.toLowerCase();
+            const baseName = `${prefix}-${file.basename}`;
+            const notePath = `${folder}/${baseName}.md`;
+            return { baseName, notePath };
+        }
     }
 
     // Utility: check if a note exists and whether it links to the given target via configured YAML property
@@ -231,6 +241,27 @@ export default class HenniPlugin extends Plugin {
         return null;
     }
 
+    private formatExposureTime(exposure?: number): string {
+        if (exposure == null || !Number.isFinite(exposure) || exposure <= 0) {
+            return '';
+        }
+        if (exposure >= 1) {
+            const rounded = Math.round(exposure * 10) / 10;
+            return Number.isInteger(rounded) ? `${rounded}` : `${rounded.toFixed(1)}`;
+        }
+        const reciprocal = 1 / exposure;
+        const roundedDenominator = Math.round(reciprocal);
+        if (roundedDenominator > 0) {
+            const approx = 1 / roundedDenominator;
+            const relativeError = Math.abs(approx - exposure) / exposure;
+            if (relativeError <= 0.02) {
+                return `1/${roundedDenominator}`;
+            }
+        }
+        const rounded = Math.round(exposure * 1000) / 1000;
+        return `${rounded}`;
+    }
+
     private async buildNoteContent(file: TFile, kind: MediaKind, duplicate = false): Promise<string> {
         const template = await this.loadTemplate(kind);
         const created = dateCreated();
@@ -275,7 +306,7 @@ export default class HenniPlugin extends Plugin {
             exifCameraModel: exifData?.model ?? '',
             exifLensModel: exifData?.lensModel ?? '',
             exifTakenAt: exifData?.takenAt ?? '',
-            exifExposureTime: exifData?.exposureTime != null ? `${exifData.exposureTime}` : '',
+            exifExposureTime: this.formatExposureTime(exifData?.exposureTime),
             exifFNumber: exifData?.fNumber != null ? `${exifData.fNumber}` : '',
             exifIso: exifData?.iso != null ? `${exifData.iso}` : '',
             exifFocalLength: exifData?.focalLength != null ? `${exifData.focalLength}` : '',

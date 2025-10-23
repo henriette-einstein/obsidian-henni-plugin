@@ -16,6 +16,7 @@ export interface HenniPluginSettings {
     imageTemplatePath: string;
     pdfTemplatePath: string;
     otherTemplatePath: string;
+    useSuffix: boolean;
 }
 
 export const DEFAULT_SETTINGS: HenniPluginSettings = {
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS: HenniPluginSettings = {
     imageTemplatePath: '',
     pdfTemplatePath: '',
     otherTemplatePath: '',
+    useSuffix: false,
 };
 
 export class ImageNoteSettingTab extends PluginSettingTab {
@@ -71,6 +73,16 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.autoCreateOnFileAdd)
                 .onChange(async (value) => {
                     this.plugin.settings.autoCreateOnFileAdd = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Use suffix-based note names')
+            .setDesc('Name media notes as filename.ext.md instead of PREFIX-filename.md.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.useSuffix)
+                .onChange(async (value) => {
+                    this.plugin.settings.useSuffix = value;
                     await this.plugin.saveSettings();
                 }));
 

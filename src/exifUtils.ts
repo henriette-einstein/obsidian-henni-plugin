@@ -17,9 +17,16 @@ export interface ExifSummary {
 }
 
 const PICK_FIELDS = [
-    'Maker',
+    'Make',
+    'CameraMake',
+    'CameraManufacturer',
+    'Manufacturer',
     'Model',
+    'CameraModel',
     'LensModel',
+    'LensMake',
+    'Lens',
+    'LensID',
     'DateTimeOriginal',
     'ExposureTime',
     'FNumber',
@@ -32,6 +39,46 @@ const PICK_FIELDS = [
 ] as const;
 
 type PickField = (typeof PICK_FIELDS)[number];
+
+const TEXT_DECODER = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8', { fatal: false }) : undefined;
+
+const decodeBinaryString = (value: Uint8Array): string => {
+    if (TEXT_DECODER) {
+        try {
+            return TEXT_DECODER.decode(value);
+        } catch {
+            // fall through to manual decoding
+        }
+    }
+    let result = '';
+    for (const byte of value) {
+        if (byte === 0) break; // stop at NULL terminator
+        result += String.fromCharCode(byte);
+    }
+    return result;
+};
+
+const toStringValue = (value: unknown): string | undefined => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (value instanceof Uint8Array) {
+        const decoded = decodeBinaryString(value).trim();
+        return decoded.length > 0 ? decoded : undefined;
+    }
+    return undefined;
+};
+
+const pickFirstString = (source: Record<string, unknown>, ...keys: string[]): string | undefined => {
+    for (const key of keys) {
+        const candidate = toStringValue(source[key]);
+        if (candidate) {
+            return candidate;
+        }
+    }
+    return undefined;
+};
 
 const toNumber = (value: unknown): number | undefined => {
     if (typeof value === 'number') return value;
@@ -92,13 +139,18 @@ export async function extractExifData(buffer: ArrayBuffer): Promise<ExifSummary 
             return null;
         }
 
-        const get = (key: PickField): unknown => {
-            return (parsed as Record<string, unknown>)[key];
-        };
+        const record = parsed as Record<string, unknown>;
+        const get = (key: PickField): unknown => record[key];
 
-        const maker = get('Maker');
-        const model = get('Model');
-        const lensModel = get('LensModel');
+        const maker = pickFirstString(
+            record,
+            'Make',
+            'CameraMake',
+            'CameraManufacturer',
+            'Manufacturer'
+        );
+        const model = pickFirstString(record, 'Model', 'CameraModel');
+        const lensModel = pickFirstString(record, 'LensModel', 'Lens', 'LensID', 'LensMake');
         const takenAt = toIsoDate(get('DateTimeOriginal'));
         const exposureTime = toNumber(get('ExposureTime'));
         const fNumber = toNumber(get('FNumber'));
@@ -110,9 +162,9 @@ export async function extractExifData(buffer: ArrayBuffer): Promise<ExifSummary 
         const altitude = toNumber(get('GPSAltitude'));
 
         return {
-            maker: typeof maker === 'string' ? maker : undefined,
-            model: typeof model === 'string' ? model : undefined,
-            lensModel: typeof lensModel === 'string' ? lensModel : undefined,
+            maker,
+            model,
+            lensModel,
             takenAt,
             exposureTime,
             fNumber,
