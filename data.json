@@ -19,9 +19,9 @@
     "pdf"
   ],
   "otherExtensions": [
-    "xls",
-    "docx",
-    "ppt"
+    "numbers",
+    "xlsx",
+    "csv"
   ],
   "imageTemplatePath": "",
   "pdfTemplatePath": "",

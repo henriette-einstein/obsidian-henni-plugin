@@ -68,7 +68,8 @@ export default class HenniPlugin extends Plugin {
             const suffixSource = file.extension ? file.extension : kind;
             const suffix = suffixSource.toLowerCase();
             const baseName = `${file.basename}.${suffix}`;
-            const notePath = `${folder}/${baseName}.md`;
+            const prefix = folder && folder.trim().length > 0 ? `${folder.trim()}/` : '';
+            const notePath = `${prefix}${baseName}.md`;
             
             return { baseName, notePath };
         } else {
@@ -76,7 +77,8 @@ export default class HenniPlugin extends Plugin {
             const prefix = prefixSource.toUpperCase();
             const suffix = prefixSource.toLowerCase();
             const baseName = `${prefix}-${file.basename}`;
-            const notePath = `${folder}/${baseName}.md`;
+            const folderPrefix = folder && folder.trim().length > 0 ? `${folder.trim()}/` : '';
+            const notePath = `${folderPrefix}${baseName}.md`;
             return { baseName, notePath };
         }
     }
@@ -151,24 +153,32 @@ export default class HenniPlugin extends Plugin {
 
     // Utility: ensure the target folder exists
     private async ensureFolderExists(folder: string): Promise<void> {
-        if (this.ensuredFolders.has(folder)) return;
+        const normalized = folder.trim();
+        if (!normalized) return;
+        if (this.ensuredFolders.has(normalized)) return;
+
+        const parent = normalized.split('/').slice(0, -1).join('/');
+        if (parent && parent !== normalized) {
+            await this.ensureFolderExists(parent);
+        }
+
         try {
-            if (!this.app.vault.getAbstractFileByPath(folder)) {
-                await this.app.vault.createFolder(folder);
+            if (!this.app.vault.getAbstractFileByPath(normalized)) {
+                await this.app.vault.createFolder(normalized);
             }
         } catch (e: any) {
             const msg = typeof e === 'string' ? e : e?.message;
-            if (!msg || !/exist/i.test(msg)) {
-                console.error('Failed to ensure folder exists', folder, e);
+            if (!msg || !/\balready exists\b/i.test(msg)) {
+                console.error('Failed to ensure folder exists', normalized, e);
             }
         }
-        this.ensuredFolders.add(folder);
+        this.ensuredFolders.add(normalized);
     }
 
     // Utility: detect already-exists errors
     private isAlreadyExistsError(e: any): boolean {
         const msg = typeof e === 'string' ? e : e?.message;
-        return !!(msg && /exist/i.test(msg));
+        return !!(msg && /\balready exists\b/i.test(msg));
     }
 
     // Utility: build note content for a media file
@@ -367,12 +377,40 @@ export default class HenniPlugin extends Plugin {
         });
     }
 
+    private async openOrCreateMediaNote(file: TFile, kind: MediaKind): Promise<void> {
+        let targetFolder = this.getTargetFolder(kind) ?? '';
+        if (!targetFolder.trim()) {
+            targetFolder = file.parent?.path ?? '';
+        }
+        targetFolder = targetFolder.trim();
+
+        try {
+            await this.processMedia(file, kind, targetFolder);
+        } catch (error) {
+            console.error('Failed to create media note', file.path, error);
+            new Notice('Failed to create media note. See console for details.');
+            return;
+        }
+
+        const existingPath = await this.getIndexNotePath(file);
+        const fallbackPath = existingPath ?? this.computePrimaryNotePath(file, kind, targetFolder).notePath;
+        const target = this.app.vault.getAbstractFileByPath(fallbackPath);
+        if (target instanceof TFile) {
+            await this.app.workspace.getLeaf(false).openFile(target);
+        } else {
+            new Notice('Media note created but could not be opened.');
+        }
+    }
+
     // Utility: create or copy a note for a media file (shared by commands and event handler)
     public async processMedia(file: TFile, kind: MediaKind, targetFolder: string): Promise<void> {
         if (!targetFolder || !targetFolder.trim()) {    
             targetFolder = file.parent?.path || '';
         }
-        await this.ensureFolderExists(targetFolder);
+        targetFolder = targetFolder.trim();
+        if (targetFolder) {
+            await this.ensureFolderExists(targetFolder);
+        }
         const { baseName, notePath } = this.computePrimaryNotePath(file, kind, targetFolder);
 
         const status = await this.noteStatus(notePath, file.path);
@@ -433,7 +471,7 @@ export default class HenniPlugin extends Plugin {
 
         this.addCommand({
             id: 'scan-images-and-create-imagenote',
-            name: 'Scan images and create image notes',
+            name: 'Scan images and create media notes',
             callback: async () => {
                 const extensions = this.getExtensions('image');
                 if (extensions.length === 0) {
@@ -453,7 +491,7 @@ export default class HenniPlugin extends Plugin {
         // PDF scan and note creation
         this.addCommand({
             id: 'scan-pdfs-and-create-pdfnote',
-            name: 'Scan PDFs and create PDF notes',
+            name: 'Scan PDFs and create media notes',
             callback: async () => {
                 const extensions = this.getExtensions('pdf');
                 if (extensions.length === 0) {
@@ -468,6 +506,45 @@ export default class HenniPlugin extends Plugin {
                 }
                 new Notice('Scan complete. PDF notes updated.');
             }
+        });
+
+        this.addCommand({
+            id: 'scan-other-media-and-create-notes',
+            name: 'Scan other media and create media notes',
+            callback: async () => {
+                const extensions = this.getExtensions('other');
+                if (extensions.length === 0) {
+                    new Notice('No extensions configured for other digital assets.');
+                    return;
+                }
+                new Notice('Scanning digital assets...');
+                const assets = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'other'));
+                const folder = this.settings.otherDigitalAssetsNoteFolder;
+                for (const asset of assets) {
+                    try { await this.processMedia(asset, 'other', folder); } catch (e) { console.error('Failed processing asset', asset.path, e); }
+                }
+                new Notice('Scan complete. Digital asset notes updated.');
+            }
+        });
+
+        this.addCommand({
+            id: 'create-media-note-for-active-file',
+            name: 'Create or view media note for current file',
+            checkCallback: (checking) => {
+                const file = this.app.workspace.getActiveFile();
+                if (!file) {
+                    return false;
+                }
+                const kind = this.resolveKind(file);
+                if (!kind) {
+                    return false;
+                }
+                if (checking) {
+                    return true;
+                }
+                void this.openOrCreateMediaNote(file, kind);
+                return true;
+            },
         });
 
         // Auto-create notes when supported files are added to the vault
@@ -544,12 +621,7 @@ export default class HenniPlugin extends Plugin {
                 menu.addItem(item => {
                     item.setTitle('Create Media Note');
                     item.onClick(async () => {
-                        await this.processMedia(file, kind, folder);
-                        const pathToOpen = await this.getIndexNotePath(file);
-                        const target = pathToOpen ? this.app.vault.getAbstractFileByPath(pathToOpen) : this.app.vault.getAbstractFileByPath(notePath);
-                        if (target instanceof TFile) {
-                            await this.app.workspace.getLeaf(false).openFile(target);
-                        }
+                        await this.openOrCreateMediaNote(file, kind);
                     });
                 });
             }
