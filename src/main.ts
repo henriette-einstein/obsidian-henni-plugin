@@ -1,4 +1,4 @@
-import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder } from 'obsidian';
+import { Notice, Plugin, TAbstractFile, TFile, TFolder } from 'obsidian';
 import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
 import { extractExifData, type ExifSummary } from './exifUtils';
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
@@ -495,6 +495,68 @@ export default class HenniPlugin extends Plugin {
         }
     }
 
+    private getLinkPropertyValue(file: TFile): string | null {
+        const key = (this.settings.fileLinkProperty || 'url').trim() || 'url';
+        const cache = this.app.metadataCache.getFileCache(file);
+        const frontmatter = cache?.frontmatter as Record<string, unknown> | undefined;
+        if (!frontmatter) return null;
+        let raw = frontmatter[key];
+        if (Array.isArray(raw)) {
+            raw = raw.find(entry => typeof entry === 'string' && entry.trim().length > 0) ?? raw[0];
+        }
+        if (typeof raw === 'number' || typeof raw === 'boolean') {
+            raw = String(raw);
+        }
+        if (typeof raw !== 'string') return null;
+        const trimmed = raw.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    }
+
+    private getReferencedSource(file: TFile): { type: 'url'; value: string } | { type: 'file'; value: TFile } | null {
+        const raw = this.getLinkPropertyValue(file);
+        if (!raw) return null;
+        const trimmed = raw.replace(/^"|"$/g, '').trim();
+        if (!trimmed) return null;
+
+        const wiki = trimmed.match(/^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/);
+        if (wiki) {
+            const link = wiki[1].trim();
+            if (link) {
+                const target = this.app.metadataCache.getFirstLinkpathDest(link, file.path);
+                if (target) return { type: 'file', value: target };
+            }
+        }
+
+        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+            return { type: 'url', value: trimmed };
+        }
+
+        const byPath = this.app.vault.getAbstractFileByPath(trimmed);
+        if (byPath instanceof TFile) {
+            return { type: 'file', value: byPath };
+        }
+
+        const resolved = this.app.metadataCache.getFirstLinkpathDest(trimmed, file.path);
+        if (resolved) {
+            return { type: 'file', value: resolved };
+        }
+
+        return null;
+    }
+
+    private async openReferencedSource(file: TFile): Promise<void> {
+        const target = this.getReferencedSource(file);
+        if (!target) {
+            new Notice('No referenced source found.');
+            return;
+        }
+        if (target.type === 'url') {
+            window.open(target.value, '_blank', 'noopener');
+            return;
+        }
+        await this.app.workspace.getLeaf(false).openFile(target.value);
+    }
+
     private async createNotesForFolder(folder: TFolder): Promise<void> {
         const queue: TAbstractFile[] = [...(folder.children ?? [])];
         const targets: Array<{ file: TFile; kind: MediaKind }> = [];
@@ -722,6 +784,29 @@ export default class HenniPlugin extends Plugin {
             },
         });
 
+        this.addCommand({
+            id: 'open-referenced-source-for-active-note',
+            name: 'Open referenced source for current note',
+            checkCallback: (checking) => {
+                const file = this.app.workspace.getActiveFile();
+                if (!file) {
+                    return false;
+                }
+                if (file.extension?.toLowerCase() !== 'md') {
+                    return false;
+                }
+                const reference = this.getReferencedSource(file);
+                if (!reference) {
+                    return false;
+                }
+                if (checking) {
+                    return true;
+                }
+                void this.openReferencedSource(file);
+                return true;
+            },
+        });
+
         // Auto-create notes when supported files are added to the vault
         this.registerEvent(this.app.vault.on('create', async (file) => {
             if (!(file instanceof TFile)) return;
@@ -769,87 +854,105 @@ export default class HenniPlugin extends Plugin {
         this.registerEvent(this.app.workspace.on('file-menu', (menu, abstract) => {
             if (abstract instanceof TFile) {
                 const file = abstract;
+                const actions: Array<{ title: string; handler: () => Promise<void> | void }> = [];
+
                 const kind = this.resolveKind(file);
-                if (!kind) return;
+                if (kind) {
+                    let noteFolder = this.getTargetFolder(kind) ?? '';
+                    if (!noteFolder.trim()) {
+                        noteFolder = file.parent?.path ?? '';
+                    }
+                    const normalizedFolder = this.normalizeFolderPath(noteFolder);
+                    const { baseName, notePath } = this.computePrimaryNotePath(file, kind, normalizedFolder);
 
-                const folder = this.getTargetFolder(kind);
-                if (!folder) {
-                    new Notice(`No target folder configured for ${kind} notes.`);
-                    return;
-                }
-                const normalizedFolder = this.normalizeFolderPath(folder);
-                const { baseName, notePath } = this.computePrimaryNotePath(file, kind, normalizedFolder);
-
-                const candidateExists = this.app.vault.getFiles().some(candidate => {
-                    const candidateFolder = this.normalizeFolderPath(candidate.parent?.path ?? '');
-                    if (candidateFolder !== normalizedFolder) return false;
-                    if (candidate.path === notePath) return true;
-                    if (candidate.basename === baseName) return true;
-                    return candidate.basename.startsWith(`${baseName} (`);
-                });
-
-                let hasActions = false;
-                const ensureSubmenu = (item: any) => {
-                    const sub = (item as any).setSubmenu();
-                    return sub as Menu;
-                };
-
-                menu.addItem(item => {
-                    const sub = ensureSubmenu(item);
-                    item.setTitle('Media Notes');
-
-                    const addAction = (title: string, handler: () => Promise<void> | void) => {
-                        sub.addItem((subItem: any) => {
-                            subItem.setTitle(title);
-                            subItem.onClick(() => { void handler(); });
-                        });
-                        hasActions = true;
-                    };
+                    const candidateExists = this.app.vault.getFiles().some(candidate => {
+                        const candidateFolder = this.normalizeFolderPath(candidate.parent?.path ?? '');
+                        if (candidateFolder !== normalizedFolder) return false;
+                        if (candidate.path === notePath) return true;
+                        if (candidate.basename === baseName) return true;
+                        return candidate.basename.startsWith(`${baseName} (`);
+                    });
 
                     if (candidateExists) {
-                        addAction('Open Media Note', async () => {
-                            const pathToOpen = await this.getIndexNotePath(file);
-                            if (!pathToOpen) {
-                                new Notice('No media note found for this file.');
-                                return;
-                            }
-                            const target = this.app.vault.getAbstractFileByPath(pathToOpen);
-                            if (target instanceof TFile) {
-                                await this.app.workspace.getLeaf(false).openFile(target);
-                            }
+                        actions.push({
+                            title: 'Open Media Note',
+                            handler: async () => {
+                                const pathToOpen = await this.getIndexNotePath(file);
+                                if (!pathToOpen) {
+                                    new Notice('No media note found for this file.');
+                                    return;
+                                }
+                                const target = this.app.vault.getAbstractFileByPath(pathToOpen);
+                                if (target instanceof TFile) {
+                                    await this.app.workspace.getLeaf(false).openFile(target);
+                                }
+                            },
                         });
-                        addAction('Delete Media Note', async () => {
-                            await this.deleteMediaNotes(file, kind);
+                        actions.push({
+                            title: 'Delete Media Note',
+                            handler: async () => {
+                                await this.deleteMediaNotes(file, kind);
+                            },
                         });
                     } else {
-                        addAction('Create Media Note', async () => {
-                            await this.openOrCreateMediaNote(file, kind, true);
+                        actions.push({
+                            title: 'Create Media Note',
+                            handler: async () => {
+                                await this.openOrCreateMediaNote(file, kind, true);
+                            },
                         });
                     }
 
-                if (kind === 'pdf') {
-                    addAction('Extract first page as image', async () => {
-                        const folderPath = this.settings.pdfFirstPageFolder;
-                        await this.extractPdfFirstPage(file, folderPath, true);
+                    if (kind === 'pdf') {
+                        actions.push({
+                            title: 'Extract first page as image',
+                            handler: async () => {
+                                const folderPath = this.settings.pdfFirstPageFolder;
+                                await this.extractPdfFirstPage(file, folderPath, true);
+                            },
+                        });
+                    }
+                }
+
+                if (file.parent instanceof TFolder) {
+                    actions.push({
+                        title: 'Create Media Notes in Folder',
+                        handler: async () => {
+                            await this.createNotesForFolder(file.parent as TFolder);
+                        },
                     });
                 }
 
-                    if (file.parent instanceof TFolder) {
-                        addAction('Create Media Notes for all Media Files in  Folder', async () => {
-                            await this.createNotesForFolder(file.parent as TFolder);
+                if (file.extension?.toLowerCase() === 'md') {
+                    const reference = this.getReferencedSource(file);
+                    if (reference) {
+                        actions.push({
+                            title: 'Open referenced Source',
+                            handler: async () => {
+                                await this.openReferencedSource(file);
+                            },
                         });
                     }
-
-                if (!hasActions) {
-                    item.setDisabled(true);
                 }
-            });
+
+                if (actions.length > 0) {
+                    menu.addItem(item => {
+                        item.setTitle('Media Notes');
+                        const sub = (item as any).setSubmenu();
+                        for (const action of actions) {
+                            sub.addItem((subItem: any) => {
+                                subItem.setTitle(action.title);
+                                subItem.onClick(() => { void action.handler(); });
+                            });
+                        }
+                    });
+                }
             } else if (abstract instanceof TFolder) {
                 menu.addItem(item => {
                     item.setTitle('Media Notes');
                     const sub = (item as any).setSubmenu();
                     sub.addItem((subItem: any) => {
-                        subItem.setTitle('Create Media Notes for all Media Files in  Folder');
+                        subItem.setTitle('Create Media Notes in Folder');
                         subItem.onClick(() => { void this.createNotesForFolder(abstract); });
                     });
                 });
