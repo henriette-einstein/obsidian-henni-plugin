@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, TFolder, TAbstractFile } from 'obsidian';
+import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder } from 'obsidian';
 import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
 import { extractExifData, type ExifSummary } from './exifUtils';
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
@@ -770,9 +770,8 @@ export default class HenniPlugin extends Plugin {
             if (abstract instanceof TFile) {
                 const file = abstract;
                 const kind = this.resolveKind(file);
-                if (!kind) {
-                    return;
-                }
+                if (!kind) return;
+
                 const folder = this.getTargetFolder(kind);
                 if (!folder) {
                     new Notice(`No target folder configured for ${kind} notes.`);
@@ -789,10 +788,26 @@ export default class HenniPlugin extends Plugin {
                     return candidate.basename.startsWith(`${baseName} (`);
                 });
 
-                if (candidateExists) {
-                    menu.addItem(item => {
-                        item.setTitle('Open Media Note');
-                        item.onClick(async () => {
+                let hasActions = false;
+                const ensureSubmenu = (item: any) => {
+                    const sub = (item as any).setSubmenu();
+                    return sub as Menu;
+                };
+
+                menu.addItem(item => {
+                    const sub = ensureSubmenu(item);
+                    item.setTitle('Media Notes');
+
+                    const addAction = (title: string, handler: () => Promise<void> | void) => {
+                        sub.addItem((subItem: any) => {
+                            subItem.setTitle(title);
+                            subItem.onClick(() => { void handler(); });
+                        });
+                        hasActions = true;
+                    };
+
+                    if (candidateExists) {
+                        addAction('Open Media Note', async () => {
                             const pathToOpen = await this.getIndexNotePath(file);
                             if (!pathToOpen) {
                                 new Notice('No media note found for this file.');
@@ -803,37 +818,39 @@ export default class HenniPlugin extends Plugin {
                                 await this.app.workspace.getLeaf(false).openFile(target);
                             }
                         });
-                    });
-                    menu.addItem(item => {
-                        item.setTitle('Delete Media Note');
-                        item.onClick(async () => {
+                        addAction('Delete Media Note', async () => {
                             await this.deleteMediaNotes(file, kind);
                         });
-                    });
-                } else {
-                    menu.addItem(item => {
-                        item.setTitle('Create Media Note');
-                        item.onClick(async () => {
+                    } else {
+                        addAction('Create Media Note', async () => {
                             await this.openOrCreateMediaNote(file, kind, true);
                         });
+                    }
+
+                if (kind === 'pdf') {
+                    addAction('Extract first page as image', async () => {
+                        const folderPath = this.settings.pdfFirstPageFolder;
+                        await this.extractPdfFirstPage(file, folderPath, true);
                     });
                 }
 
-                if (kind === 'pdf') {
-                    menu.addItem(item => {
-                        item.setTitle('Extract first page as image');
-                        item.onClick(async () => {
-                            const folder = this.settings.pdfFirstPageFolder;
-                            await this.extractPdfFirstPage(file, folder,true);
+                    if (file.parent instanceof TFolder) {
+                        addAction('Create Media Notes for all Media Files in  Folder', async () => {
+                            await this.createNotesForFolder(file.parent as TFolder);
                         });
-                    });
+                    }
+
+                if (!hasActions) {
+                    item.setDisabled(true);
                 }
+            });
             } else if (abstract instanceof TFolder) {
-                menu.addSeparator();
                 menu.addItem(item => {
-                    item.setTitle('Create Media Notes for all media files in this Folder');
-                    item.onClick(async () => {
-                        await this.createNotesForFolder(abstract);
+                    item.setTitle('Media Notes');
+                    const sub = (item as any).setSubmenu();
+                    sub.addItem((subItem: any) => {
+                        subItem.setTitle('Create Media Notes for all Media Files in  Folder');
+                        subItem.onClick(() => { void this.createNotesForFolder(abstract); });
                     });
                 });
             }
