@@ -927,7 +927,7 @@ export default class HenniPlugin extends Plugin {
                     const reference = this.getReferencedSource(file);
                     if (reference) {
                         actions.push({
-                            title: 'Open referenced Source',
+                            title: 'Open referenced source',
                             handler: async () => {
                                 await this.openReferencedSource(file);
                             },
