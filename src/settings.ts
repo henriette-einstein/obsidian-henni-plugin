@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting, SuggestModal, TextComponent, TFile } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, SuggestModal, TextAreaComponent, TextComponent, TFile, TFolder } from 'obsidian';
 import type HenniPlugin from './main';
 import type { MediaKind } from './main';
 
@@ -17,6 +17,9 @@ export interface HenniPluginSettings {
     pdfTemplatePath: string;
     otherTemplatePath: string;
     useSuffix: boolean;
+    imageSourceFolders: string[];
+    pdfSourceFolders: string[];
+    otherSourceFolders: string[];
 }
 
 export const DEFAULT_SETTINGS: HenniPluginSettings = {
@@ -34,6 +37,9 @@ export const DEFAULT_SETTINGS: HenniPluginSettings = {
     pdfTemplatePath: '',
     otherTemplatePath: '',
     useSuffix: false,
+    imageSourceFolders: [],
+    pdfSourceFolders: [],
+    otherSourceFolders: [],
 };
 
 export class ImageNoteSettingTab extends PluginSettingTab {
@@ -133,6 +139,38 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                     });
                 setWide(text);
             });
+
+        const imageSourceFoldersSetting = new Setting(containerEl)
+            .setName('Allowed image source folders')
+            .setDesc('Only create image notes for files inside these folders (one per line). Leave empty to allow the entire vault.');
+        let imageSourceFoldersText: TextAreaComponent;
+        imageSourceFoldersSetting.addTextArea(text => {
+            imageSourceFoldersText = text;
+            text
+                .setPlaceholder('e.g. 60 Bibliothek/Bilder')
+                .setValue((this.plugin.settings.imageSourceFolders ?? []).join('\n'))
+                .onChange(async (value) => {
+                    this.plugin.settings.imageSourceFolders = this.plugin.normalizeFolderList(value);
+                    await this.plugin.saveSettings();
+                });
+            text.inputEl.style.width = '320px';
+            text.inputEl.style.height = '96px';
+        });
+        imageSourceFoldersSetting.addExtraButton(btn => {
+            btn.setIcon('folder-open');
+            btn.setTooltip('Add folder');
+            btn.onClick(() => {
+                new FolderPickerModal(this.app, (folder) => {
+                    const normalized = this.plugin.normalizeFolderPath(folder?.path ?? '');
+                    if (!normalized) return;
+                    const current = new Set(this.plugin.settings.imageSourceFolders ?? []);
+                    current.add(normalized);
+                    this.plugin.settings.imageSourceFolders = Array.from(current).sort();
+                    imageSourceFoldersText!.setValue(this.plugin.settings.imageSourceFolders.join('\n'));
+                    void this.plugin.saveSettings();
+                }).open();
+            });
+        });
 
         new Setting(containerEl)
             .setName('Image extensions')
@@ -236,6 +274,38 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                 setWide(text);
             });
 
+        const pdfSourceFoldersSetting = new Setting(containerEl)
+            .setName('Allowed PDF source folders')
+            .setDesc('Only create PDF notes for files inside these folders (one per line). Leave empty to allow the entire vault.');
+        let pdfSourceFoldersText: TextAreaComponent;
+        pdfSourceFoldersSetting.addTextArea(text => {
+            pdfSourceFoldersText = text;
+            text
+                .setPlaceholder('e.g. 60 Bibliothek/PDFs')
+                .setValue((this.plugin.settings.pdfSourceFolders ?? []).join('\n'))
+                .onChange(async (value) => {
+                    this.plugin.settings.pdfSourceFolders = this.plugin.normalizeFolderList(value);
+                    await this.plugin.saveSettings();
+                });
+            text.inputEl.style.width = '320px';
+            text.inputEl.style.height = '96px';
+        });
+        pdfSourceFoldersSetting.addExtraButton(btn => {
+            btn.setIcon('folder-open');
+            btn.setTooltip('Add folder');
+            btn.onClick(() => {
+                new FolderPickerModal(this.app, (folder) => {
+                    const normalized = this.plugin.normalizeFolderPath(folder?.path ?? '');
+                    if (!normalized) return;
+                    const current = new Set(this.plugin.settings.pdfSourceFolders ?? []);
+                    current.add(normalized);
+                    this.plugin.settings.pdfSourceFolders = Array.from(current).sort();
+                    pdfSourceFoldersText!.setValue(this.plugin.settings.pdfSourceFolders.join('\n'));
+                    void this.plugin.saveSettings();
+                }).open();
+            });
+        });
+
         new Setting(containerEl)
             .setName('PDF extensions')
             .setDesc('Comma-separated list of extensions treated as PDFs.')
@@ -323,6 +393,38 @@ export class ImageNoteSettingTab extends PluginSettingTab {
                     });
                 setWide(text);
             });
+
+        const otherSourceFoldersSetting = new Setting(containerEl)
+            .setName('Allowed other asset source folders')
+            .setDesc('Only create notes for other assets inside these folders (one per line). Leave empty to allow the entire vault.');
+        let otherSourceFoldersText: TextAreaComponent;
+        otherSourceFoldersSetting.addTextArea(text => {
+            otherSourceFoldersText = text;
+            text
+                .setPlaceholder('e.g. 60 Bibliothek/Medien')
+                .setValue((this.plugin.settings.otherSourceFolders ?? []).join('\n'))
+                .onChange(async (value) => {
+                    this.plugin.settings.otherSourceFolders = this.plugin.normalizeFolderList(value);
+                    await this.plugin.saveSettings();
+                });
+            text.inputEl.style.width = '320px';
+            text.inputEl.style.height = '96px';
+        });
+        otherSourceFoldersSetting.addExtraButton(btn => {
+            btn.setIcon('folder-open');
+            btn.setTooltip('Add folder');
+            btn.onClick(() => {
+                new FolderPickerModal(this.app, (folder) => {
+                    const normalized = this.plugin.normalizeFolderPath(folder?.path ?? '');
+                    if (!normalized) return;
+                    const current = new Set(this.plugin.settings.otherSourceFolders ?? []);
+                    current.add(normalized);
+                    this.plugin.settings.otherSourceFolders = Array.from(current).sort();
+                    otherSourceFoldersText!.setValue(this.plugin.settings.otherSourceFolders.join('\n'));
+                    void this.plugin.saveSettings();
+                }).open();
+            });
+        });
 
         new Setting(containerEl)
             .setName('Other extensions')
@@ -425,5 +527,31 @@ class TemplatePickerModal extends SuggestModal<TFile> {
 
     onChooseSuggestion(file: TFile, evt: MouseEvent | KeyboardEvent): void {
         this.onChoose(file);
+    }
+}
+
+class FolderPickerModal extends SuggestModal<TFolder> {
+    private readonly onChoose: (folder: TFolder) => void;
+
+    constructor(app: App, onChoose: (folder: TFolder) => void) {
+        super(app);
+        this.onChoose = onChoose;
+        this.setPlaceholder('Select folder');
+    }
+
+    getSuggestions(query: string): TFolder[] {
+        const lower = query.toLowerCase();
+        return this.app.vault.getAllLoadedFiles()
+            .filter((file): file is TFolder => file instanceof TFolder)
+            .filter(folder => folder.path.toLowerCase().includes(lower))
+            .slice(0, 100);
+    }
+
+    renderSuggestion(folder: TFolder, el: HTMLElement): void {
+        el.createEl('div', { text: folder.path });
+    }
+
+    onChooseSuggestion(folder: TFolder, evt: MouseEvent | KeyboardEvent): void {
+        this.onChoose(folder);
     }
 }

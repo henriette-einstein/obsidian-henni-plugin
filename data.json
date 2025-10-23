@@ -26,5 +26,13 @@
   "imageTemplatePath": "",
   "pdfTemplatePath": "",
   "otherTemplatePath": "",
-  "useSuffix": true
+  "useSuffix": true,
+  "imageSourceFolders": [
+    "80 Medien/Bilder/Bilder mit EXIF",
+    "80 Medien/Bilder/Cover Images"
+  ],
+  "pdfSourceFolders": [
+    "80 Medien/PDFs/G Geschichte"
+  ],
+  "otherSourceFolders": []
 }

@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile } from 'obsidian';
+import { Notice, Plugin, TFile, TFolder, TAbstractFile } from 'obsidian';
 import { getFirstPdfPageAsJpg, initPdfWorker } from './pdfUtils'; // Ensure the module is included
 import { extractExifData, type ExifSummary } from './exifUtils';
 import { DEFAULT_SETTINGS, ImageNoteSettingTab, type HenniPluginSettings } from './settings';
@@ -63,12 +63,63 @@ export default class HenniPlugin extends Plugin {
         return this.settings.otherDigitalAssetsNoteFolder;
     }
 
+    private normalizeVaultPath(path: string | undefined): string {
+        if (!path) return '';
+        const unified = path.trim().replace(/\\/g, '/');
+        const withoutLeading = unified.replace(/^\/+/, '');
+        const withoutTrailing = withoutLeading.replace(/\/+$/, '');
+        return withoutTrailing;
+    }
+
+    public normalizeFolderPath(path: string | undefined): string {
+        return this.normalizeVaultPath(path);
+    }
+
+    public normalizeFolderList(input: unknown): string[] {
+        if (!input) return [];
+        const source = Array.isArray(input)
+            ? input
+            : typeof input === 'string'
+                ? input.split(/\r?\n|[,;]/g)
+                : [];
+        const normalized = (source as unknown[])
+            .map(entry => typeof entry === 'string' ? this.normalizeFolderPath(entry) : '')
+            .filter((entry): entry is string => !!entry);
+        const unique = Array.from(new Set(normalized));
+        unique.sort((a, b) => a.localeCompare(b));
+        return unique;
+    }
+
+    private isPathWithinFolder(filePath: string, folderPath: string): boolean {
+        const normalizedFolder = this.normalizeFolderPath(folderPath);
+        if (!normalizedFolder) return true;
+        const fileLower = this.normalizeVaultPath(filePath).toLowerCase();
+        const folderLower = normalizedFolder.toLowerCase();
+        if (fileLower === folderLower) return true;
+        const prefix = `${folderLower}/`;
+        return fileLower.startsWith(prefix);
+    }
+
+    private getAllowedFolders(kind: MediaKind): string[] {
+        if (kind === 'image') return this.settings.imageSourceFolders ?? [];
+        if (kind === 'pdf') return this.settings.pdfSourceFolders ?? [];
+        return this.settings.otherSourceFolders ?? [];
+    }
+
+    private isSourceAllowed(file: TFile, kind: MediaKind): boolean {
+        const allowed = this.getAllowedFolders(kind);
+        if (!allowed || allowed.length === 0) return true;
+        const filePath = this.normalizeVaultPath(file.path);
+        return allowed.some(folder => this.isPathWithinFolder(filePath, folder));
+    }
+
     private computePrimaryNotePath(file: TFile, kind: MediaKind, folder: string): { baseName: string; notePath: string } {
+        const folderPath = this.normalizeFolderPath(folder);
         if (this.settings.useSuffix) {
             const suffixSource = file.extension ? file.extension : kind;
             const suffix = suffixSource.toLowerCase();
             const baseName = `${file.basename}.${suffix}`;
-            const prefix = folder && folder.trim().length > 0 ? `${folder.trim()}/` : '';
+            const prefix = folderPath ? `${folderPath}/` : '';
             const notePath = `${prefix}${baseName}.md`;
             
             return { baseName, notePath };
@@ -77,7 +128,7 @@ export default class HenniPlugin extends Plugin {
             const prefix = prefixSource.toUpperCase();
             const suffix = prefixSource.toLowerCase();
             const baseName = `${prefix}-${file.basename}`;
-            const folderPrefix = folder && folder.trim().length > 0 ? `${folder.trim()}/` : '';
+            const folderPrefix = folderPath ? `${folderPath}/` : '';
             const notePath = `${folderPrefix}${baseName}.md`;
             return { baseName, notePath };
         }
@@ -144,8 +195,10 @@ export default class HenniPlugin extends Plugin {
     // Utility: compute next available copy note path like `${folder}/${baseName} (N copy).md`
     private getNextCopyNotePath(folder: string, baseName: string): string {
         let idx = 1;
+        const folderPath = this.normalizeFolderPath(folder);
+        const prefix = folderPath ? `${folderPath}/` : '';
         while (true) {
-            const candidate = `${folder}/${baseName} (copy ${idx}).md`;
+            const candidate = `${prefix}${baseName} (copy ${idx}).md`;
             if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate;
             idx++;
         }
@@ -153,7 +206,7 @@ export default class HenniPlugin extends Plugin {
 
     // Utility: ensure the target folder exists
     private async ensureFolderExists(folder: string): Promise<void> {
-        const normalized = folder.trim();
+        const normalized = this.normalizeFolderPath(folder);
         if (!normalized) return;
         if (this.ensuredFolders.has(normalized)) return;
 
@@ -219,36 +272,48 @@ export default class HenniPlugin extends Plugin {
         }
     }
 
-    public async getIndexNotePath(file: TFile): Promise<string | null> {
-        const kind = this.resolveKind(file);
-        if (!kind) return null;
-        const folder = this.getTargetFolder(kind);
-        if (!folder) return null;
-
+    private async getMediaNotes(file: TFile, kind: MediaKind): Promise<TFile[]> {
+        let folderSetting = this.getTargetFolder(kind);
+        if (!folderSetting || !folderSetting.trim()) {
+            folderSetting = file.parent?.path ?? '';
+        }
+        if (folderSetting == null) return [];
+        const folder = this.normalizeFolderPath(folderSetting);
         const { baseName, notePath } = this.computePrimaryNotePath(file, kind, folder);
-        const primaryStatus = await this.noteStatus(notePath, file.path);
-        if (primaryStatus === 'matches') {
-            return notePath;
+        const matches: TFile[] = [];
+
+        const primary = this.app.vault.getAbstractFileByPath(notePath);
+        if (primary instanceof TFile) {
+            const status = await this.noteStatus(notePath, file.path);
+            if (status === 'matches') {
+                matches.push(primary);
+            }
         }
 
         const candidates = this.app.vault.getFiles().filter(candidate => {
-            if (candidate.parent?.path !== folder) return false;
+            const parentPath = this.normalizeFolderPath(candidate.parent?.path ?? '');
+            if (parentPath !== folder) return false;
             if (candidate.path === notePath) return true;
             if (candidate.basename === baseName) return true;
             return candidate.basename.startsWith(`${baseName} (`);
         });
 
         for (const candidate of candidates) {
-            if (candidate.path === notePath) {
-                continue;
-            }
+            if (matches.some(existing => existing.path === candidate.path)) continue;
             const status = await this.noteStatus(candidate.path, file.path);
             if (status === 'matches') {
-                return candidate.path;
+                matches.push(candidate);
             }
         }
 
-        return null;
+        return matches;
+    }
+
+    public async getIndexNotePath(file: TFile): Promise<string | null> {
+        const kind = this.resolveKind(file);
+        if (!kind) return null;
+        const notes = await this.getMediaNotes(file, kind);
+        return notes.length > 0 ? notes[0].path : null;
     }
 
     private formatExposureTime(exposure?: number): string {
@@ -377,15 +442,21 @@ export default class HenniPlugin extends Plugin {
         });
     }
 
-    private async openOrCreateMediaNote(file: TFile, kind: MediaKind): Promise<void> {
+    private async openOrCreateMediaNote(file: TFile, kind: MediaKind, force = false): Promise<void> {
         let targetFolder = this.getTargetFolder(kind) ?? '';
         if (!targetFolder.trim()) {
             targetFolder = file.parent?.path ?? '';
         }
-        targetFolder = targetFolder.trim();
+        targetFolder = this.normalizeFolderPath(targetFolder);
+
+        if (!force && !this.isSourceAllowed(file, kind)) {
+            const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
+            new Notice(`Media note creation is limited to the configured ${kindLabel} folders.`);
+            return;
+        }
 
         try {
-            await this.processMedia(file, kind, targetFolder);
+            await this.processMedia(file, kind, targetFolder, { force });
         } catch (error) {
             console.error('Failed to create media note', file.path, error);
             new Notice('Failed to create media note. See console for details.');
@@ -402,12 +473,72 @@ export default class HenniPlugin extends Plugin {
         }
     }
 
+    private async deleteMediaNotes(file: TFile, kind: MediaKind): Promise<void> {
+        const notes = await this.getMediaNotes(file, kind);
+        if (notes.length === 0) {
+            new Notice('No media note found for this file.');
+            return;
+        }
+        let deleted = 0;
+        for (const note of notes) {
+            try {
+                await this.app.vault.delete(note);
+                deleted++;
+            } catch (error) {
+                console.error('Failed to delete media note', note.path, error);
+            }
+        }
+        if (deleted === 0) {
+            new Notice('Failed to delete media note. See console for details.');
+        } else {
+            new Notice(deleted === 1 ? 'Media note deleted.' : `${deleted} media notes deleted.`);
+        }
+    }
+
+    private async createNotesForFolder(folder: TFolder): Promise<void> {
+        const queue: TAbstractFile[] = [...(folder.children ?? [])];
+        const targets: Array<{ file: TFile; kind: MediaKind }> = [];
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            if (!current) continue;
+            if (current instanceof TFolder) {
+                queue.unshift(...(current.children ?? []));
+                continue;
+            }
+            if (!(current instanceof TFile)) continue;
+            const kind = this.resolveKind(current);
+            if (!kind) continue;
+            targets.push({ file: current, kind });
+        }
+
+        if (targets.length === 0) {
+            new Notice('No supported media files found in this folder.');
+            return;
+        }
+
+        new Notice(`Processing ${targets.length} media file${targets.length === 1 ? '' : 's'}...`);
+        for (const { file, kind } of targets) {
+            try {
+                const folderSetting = this.getTargetFolder(kind) ?? '';
+                await this.processMedia(file, kind, folderSetting, { force: true });
+            } catch (error) {
+                console.error('Failed to process media file', file.path, error);
+            }
+        }
+        new Notice('Folder scan complete. Media notes updated.');
+    }
+
     // Utility: create or copy a note for a media file (shared by commands and event handler)
-    public async processMedia(file: TFile, kind: MediaKind, targetFolder: string): Promise<void> {
+    public async processMedia(file: TFile, kind: MediaKind, targetFolder: string, options?: { force?: boolean }): Promise<void> {
         if (!targetFolder || !targetFolder.trim()) {    
             targetFolder = file.parent?.path || '';
         }
-        targetFolder = targetFolder.trim();
+        const force = options?.force === true;
+        if (!force && !this.isSourceAllowed(file, kind)) {
+            return;
+        }
+        targetFolder = this.normalizeFolderPath(targetFolder);
         if (targetFolder) {
             await this.ensureFolderExists(targetFolder);
         }
@@ -471,7 +602,7 @@ export default class HenniPlugin extends Plugin {
 
         this.addCommand({
             id: 'scan-images-and-create-imagenote',
-            name: 'Scan images and create media notes',
+            name: 'Scan images and create image notes',
             callback: async () => {
                 const extensions = this.getExtensions('image');
                 if (extensions.length === 0) {
@@ -479,7 +610,9 @@ export default class HenniPlugin extends Plugin {
                     return;
                 }
                 new Notice('Scanning images...');
-                const images = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'image'));
+                const images = this.app.vault.getFiles().filter(file =>
+                    this.matchesExtension(file.extension, 'image') && this.isSourceAllowed(file, 'image')
+                );
                 const folder = this.settings.imageNoteFolder;
                 for (const image of images) {
                     try { await this.processMedia(image, 'image', folder); } catch (e) { console.error('Failed processing image', image.path, e); }
@@ -491,7 +624,7 @@ export default class HenniPlugin extends Plugin {
         // PDF scan and note creation
         this.addCommand({
             id: 'scan-pdfs-and-create-pdfnote',
-            name: 'Scan PDFs and create media notes',
+            name: 'Scan PDFs and create PDF notes',
             callback: async () => {
                 const extensions = this.getExtensions('pdf');
                 if (extensions.length === 0) {
@@ -499,7 +632,9 @@ export default class HenniPlugin extends Plugin {
                     return;
                 }
                 new Notice('Scanning PDFs...');
-                const pdfs = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'pdf'));
+                const pdfs = this.app.vault.getFiles().filter(file =>
+                    this.matchesExtension(file.extension, 'pdf') && this.isSourceAllowed(file, 'pdf')
+                );
                 const folder = this.settings.pdfNoteFolder;
                 for (const pdf of pdfs) {
                     try { await this.processMedia(pdf, 'pdf', folder); } catch (e) { console.error('Failed processing pdf', pdf.path, e); }
@@ -510,7 +645,7 @@ export default class HenniPlugin extends Plugin {
 
         this.addCommand({
             id: 'scan-other-media-and-create-notes',
-            name: 'Scan other media and create media notes',
+            name: 'Scan other media and create notes',
             callback: async () => {
                 const extensions = this.getExtensions('other');
                 if (extensions.length === 0) {
@@ -518,7 +653,9 @@ export default class HenniPlugin extends Plugin {
                     return;
                 }
                 new Notice('Scanning digital assets...');
-                const assets = this.app.vault.getFiles().filter(file => this.matchesExtension(file.extension, 'other'));
+                const assets = this.app.vault.getFiles().filter(file =>
+                    this.matchesExtension(file.extension, 'other') && this.isSourceAllowed(file, 'other')
+                );
                 const folder = this.settings.otherDigitalAssetsNoteFolder;
                 for (const asset of assets) {
                     try { await this.processMedia(asset, 'other', folder); } catch (e) { console.error('Failed processing asset', asset.path, e); }
@@ -542,7 +679,45 @@ export default class HenniPlugin extends Plugin {
                 if (checking) {
                     return true;
                 }
-                void this.openOrCreateMediaNote(file, kind);
+                void this.openOrCreateMediaNote(file, kind, true);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: 'delete-media-note-for-active-file',
+            name: 'Delete media note for current file',
+            checkCallback: (checking) => {
+                const file = this.app.workspace.getActiveFile();
+                if (!file) {
+                    return false;
+                }
+                const kind = this.resolveKind(file);
+                if (!kind) {
+                    return false;
+                }
+                if (checking) {
+                    return true;
+                }
+                void this.deleteMediaNotes(file, kind);
+                return true;
+            },
+        });
+
+        this.addCommand({
+            id: 'create-media-notes-in-current-folder',
+            name: 'Create media notes for all media files in current folder',
+            checkCallback: (checking) => {
+                const file = this.app.workspace.getActiveFile();
+                const folder = file ? this.app.vault.getAbstractFileByPath(file.parent?.path ?? '') : null;
+                const currentFolder = folder instanceof TFolder ? folder : file?.parent ?? null;
+                if (!currentFolder) {
+                    return false;
+                }
+                if (checking) {
+                    return true;
+                }
+                void this.createNotesForFolder(currentFolder);
                 return true;
             },
         });
@@ -559,18 +734,27 @@ export default class HenniPlugin extends Plugin {
 
             try {
                 if (isImage) {
+                    if (!this.isSourceAllowed(file, 'image')) {
+                        return;
+                    }
                     const folder = this.settings.imageNoteFolder;
                     await this.processMedia(file, 'image', folder);
                     return;
                 }
 
                 if (isPdf) {
+                    if (!this.isSourceAllowed(file, 'pdf')) {
+                        return;
+                    }
                     const folder = this.settings.pdfNoteFolder;
                     await this.processMedia(file, 'pdf', folder);
                     return;
                 }
 
                 if (isOther) {
+                    if (!this.isSourceAllowed(file, 'other')) {
+                        return;
+                    }
                     const folder = this.settings.otherDigitalAssetsNoteFolder;
                     if (!folder) return;
                     await this.processMedia(file, 'other', folder);
@@ -582,56 +766,74 @@ export default class HenniPlugin extends Plugin {
 
         this.addSettingTab(new ImageNoteSettingTab(this.app, this));
 
-        this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-            if (!(file instanceof TFile)) return;
-            const kind = this.resolveKind(file);
-            if (!kind) {
-                return;
-            }
-            const folder = this.getTargetFolder(kind);
-            if (!folder) {
-                new Notice(`No target folder configured for ${kind} notes.`);
-                return;
-            }
-            const { baseName, notePath } = this.computePrimaryNotePath(file, kind, folder);
+        this.registerEvent(this.app.workspace.on('file-menu', (menu, abstract) => {
+            if (abstract instanceof TFile) {
+                const file = abstract;
+                const kind = this.resolveKind(file);
+                if (!kind) {
+                    return;
+                }
+                const folder = this.getTargetFolder(kind);
+                if (!folder) {
+                    new Notice(`No target folder configured for ${kind} notes.`);
+                    return;
+                }
+                const normalizedFolder = this.normalizeFolderPath(folder);
+                const { baseName, notePath } = this.computePrimaryNotePath(file, kind, normalizedFolder);
 
-            const candidateExists = this.app.vault.getFiles().some(candidate => {
-                if (candidate.parent?.path !== folder) return false;
-                if (candidate.path === notePath) return true;
-                if (candidate.basename === baseName) return true;
-                return candidate.basename.startsWith(`${baseName} (`);
-            });
-
-            if (candidateExists) {
-                menu.addItem(item => {
-                    item.setTitle('Open Media Note');
-                    item.onClick(async () => {
-                        const pathToOpen = await this.getIndexNotePath(file);
-                        if (!pathToOpen) {
-                            new Notice('No media note found for this file.');
-                            return;
-                        }
-                        const target = this.app.vault.getAbstractFileByPath(pathToOpen);
-                        if (target instanceof TFile) {
-                            await this.app.workspace.getLeaf(false).openFile(target);
-                        }
-                    });
+                const candidateExists = this.app.vault.getFiles().some(candidate => {
+                    const candidateFolder = this.normalizeFolderPath(candidate.parent?.path ?? '');
+                    if (candidateFolder !== normalizedFolder) return false;
+                    if (candidate.path === notePath) return true;
+                    if (candidate.basename === baseName) return true;
+                    return candidate.basename.startsWith(`${baseName} (`);
                 });
-            } else {
-                menu.addItem(item => {
-                    item.setTitle('Create Media Note');
-                    item.onClick(async () => {
-                        await this.openOrCreateMediaNote(file, kind);
-                    });
-                });
-            }
 
-            if (kind === 'pdf') {
+                if (candidateExists) {
+                    menu.addItem(item => {
+                        item.setTitle('Open Media Note');
+                        item.onClick(async () => {
+                            const pathToOpen = await this.getIndexNotePath(file);
+                            if (!pathToOpen) {
+                                new Notice('No media note found for this file.');
+                                return;
+                            }
+                            const target = this.app.vault.getAbstractFileByPath(pathToOpen);
+                            if (target instanceof TFile) {
+                                await this.app.workspace.getLeaf(false).openFile(target);
+                            }
+                        });
+                    });
+                    menu.addItem(item => {
+                        item.setTitle('Delete Media Note');
+                        item.onClick(async () => {
+                            await this.deleteMediaNotes(file, kind);
+                        });
+                    });
+                } else {
+                    menu.addItem(item => {
+                        item.setTitle('Create Media Note');
+                        item.onClick(async () => {
+                            await this.openOrCreateMediaNote(file, kind, true);
+                        });
+                    });
+                }
+
+                if (kind === 'pdf') {
+                    menu.addItem(item => {
+                        item.setTitle('Extract first page as image');
+                        item.onClick(async () => {
+                            const folder = this.settings.pdfFirstPageFolder;
+                            await this.extractPdfFirstPage(file, folder,true);
+                        });
+                    });
+                }
+            } else if (abstract instanceof TFolder) {
+                menu.addSeparator();
                 menu.addItem(item => {
-                    item.setTitle('Extract first page as image');
+                    item.setTitle('Create Media Notes for all media files in this Folder');
                     item.onClick(async () => {
-                        const folder = this.settings.pdfFirstPageFolder;
-                        await this.extractPdfFirstPage(file, folder,true);
+                        await this.createNotesForFolder(abstract);
                     });
                 });
             }
@@ -684,6 +886,9 @@ export default class HenniPlugin extends Plugin {
         this.settings.imageTemplatePath = typeof (stored as any)?.imageTemplatePath === 'string' ? (stored as any).imageTemplatePath.trim() : '';
         this.settings.pdfTemplatePath = typeof (stored as any)?.pdfTemplatePath === 'string' ? (stored as any).pdfTemplatePath.trim() : '';
         this.settings.otherTemplatePath = typeof (stored as any)?.otherTemplatePath === 'string' ? (stored as any).otherTemplatePath.trim() : '';
+        this.settings.imageSourceFolders = this.normalizeFolderList((stored as any)?.imageSourceFolders);
+        this.settings.pdfSourceFolders = this.normalizeFolderList((stored as any)?.pdfSourceFolders);
+        this.settings.otherSourceFolders = this.normalizeFolderList((stored as any)?.otherSourceFolders);
         this.clearTemplateCache();
     }
 
